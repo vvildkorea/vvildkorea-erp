@@ -55,15 +55,15 @@ export function PartnerCreateModal() {
                     거래처 구분
                   </label>
                   <select
-                    name="partner_type"
-                    defaultValue="buyer"
-                    className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
+                  name="partner_type"
+                  defaultValue="retail"
+                  className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
                   >
-                    <option value="buyer">판매처</option>
-                    <option value="supplier">매입처</option>
-                    <option value="forwarder">포워딩</option>
-                    <option value="warehouse">물류/창고</option>
-                    <option value="etc">기타</option>
+                  <option value="headquarters">판매처</option>
+                  <option value="wholesale">도매점</option>
+                  <option value="retail">소매점</option>
+                  <option value="direct_store">직영점</option>
+                  <option value="etc">기타</option>
                   </select>
                 </div>
 

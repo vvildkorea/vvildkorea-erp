@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import {
   createPartner,
+  deletePartner,
   setPartnerActive,
   updatePartner,
   type PartnerType,
@@ -10,10 +11,10 @@ import {
 import { syncCurrentOperator } from "@/lib/operators";
 
 const allowedPartnerTypes: PartnerType[] = [
-  "buyer",
-  "supplier",
-  "forwarder",
-  "warehouse",
+  "headquarters",
+  "wholesale",
+  "retail",
+  "direct_store",
   "etc",
 ];
 
@@ -34,7 +35,7 @@ function getPartnerType(formData: FormData) {
     partnerTypeValue as PartnerType
   )
     ? (partnerTypeValue as PartnerType)
-    : "buyer";
+    : "retail";
 
   return partnerType;
 }
@@ -112,6 +113,20 @@ export async function togglePartnerActiveAction(formData: FormData) {
     id,
     is_active: nextIsActive === "true",
   });
+
+  revalidatePath("/partners");
+}
+
+export async function deletePartnerAction(formData: FormData) {
+  await syncCurrentOperator();
+
+  const id = getStringValue(formData, "id");
+
+  if (!id) {
+    throw new Error("거래처 ID가 없습니다.");
+  }
+
+  await deletePartner(id);
 
   revalidatePath("/partners");
 }

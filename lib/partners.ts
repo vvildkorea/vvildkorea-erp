@@ -1,10 +1,10 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export type PartnerType =
-  | "buyer"
-  | "supplier"
-  | "forwarder"
-  | "warehouse"
+  | "headquarters"
+  | "wholesale"
+  | "retail"
+  | "direct_store"
   | "etc";
 
 export type Partner = {
@@ -153,4 +153,15 @@ export async function setPartnerActive(input: {
   }
 
   return data as Partner;
+}
+
+export async function deletePartner(id: string) {
+  const { error } = await supabaseAdmin
+    .from("partners")
+    .delete()
+    .eq("id", id);
+
+  if (error) {
+    throw new Error(error.message);
+  }
 }

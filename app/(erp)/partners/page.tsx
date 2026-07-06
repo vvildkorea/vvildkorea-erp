@@ -1,4 +1,5 @@
 import { PartnerCreateModal } from "./partner-create-modal";
+import { PartnerDeleteButton } from "./partner-delete-button";
 import {
   createPartnerAction,
   togglePartnerActiveAction,
@@ -7,10 +8,10 @@ import {
 import { getPartners, type PartnerType } from "@/lib/partners";
 
 const partnerTypeLabels: Record<PartnerType, string> = {
-  buyer: "판매처",
-  supplier: "매입처",
-  forwarder: "포워딩",
-  warehouse: "물류/창고",
+  headquarters: "판매처",
+  wholesale: "도매점",
+  retail: "소매점",
+  direct_store: "직영점",
   etc: "기타",
 };
 
@@ -24,10 +25,10 @@ type PartnersPageProps = {
 
 function normalizePartnerType(value?: string): PartnerType | "all" {
   if (
-    value === "buyer" ||
-    value === "supplier" ||
-    value === "forwarder" ||
-    value === "warehouse" ||
+    value === "headquarters" ||
+    value === "wholesale" ||
+    value === "retail" ||
+    value === "direct_store" ||
     value === "etc"
   ) {
     return value;
@@ -64,7 +65,7 @@ export default async function PartnersPage({ searchParams }: PartnersPageProps) 
     <div>
       <h1 className="text-2xl font-bold">거래처 관리</h1>
       <p className="mt-2 text-sm text-slate-500">
-        판매처, 매입처, 포워딩 업체, 물류/창고 업체를 관리합니다.
+        판매처, 도매점, 소매점, 직영점, 기타 거래처를 관리합니다.
       </p>
     </div>
 
@@ -93,17 +94,17 @@ export default async function PartnersPage({ searchParams }: PartnersPageProps) 
               거래처 구분
             </label>
             <select
-              name="partner_type"
-              defaultValue={partnerType}
-              className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
-            >
-              <option value="all">전체</option>
-              <option value="buyer">판매처</option>
-              <option value="supplier">매입처</option>
-              <option value="forwarder">포워딩</option>
-              <option value="warehouse">물류/창고</option>
-              <option value="etc">기타</option>
-            </select>
+  name="partner_type"
+  defaultValue={partnerType}
+  className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
+>
+  <option value="all">전체</option>
+  <option value="headquarters">판매처</option>
+  <option value="wholesale">도매점</option>
+  <option value="retail">소매점</option>
+  <option value="direct_store">직영점</option>
+  <option value="etc">기타</option>
+</select>
           </div>
 
           <div>
@@ -176,21 +177,26 @@ export default async function PartnersPage({ searchParams }: PartnersPageProps) 
                 </div>
 
                 <div className="flex gap-2 md:justify-end">
-                  <form action={togglePartnerActiveAction}>
-                    <input type="hidden" name="id" value={partner.id} />
-                    <input
-                      type="hidden"
-                      name="next_is_active"
-                      value={partner.is_active ? "false" : "true"}
-                    />
-                    <button
-                      type="submit"
-                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                    >
-                      {partner.is_active ? "사용중지" : "재사용"}
-                    </button>
-                  </form>
-                </div>
+  <form action={togglePartnerActiveAction}>
+    <input type="hidden" name="id" value={partner.id} />
+    <input
+      type="hidden"
+      name="next_is_active"
+      value={partner.is_active ? "false" : "true"}
+    />
+    <button
+      type="submit"
+      className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+    >
+      {partner.is_active ? "사용중지" : "재사용"}
+    </button>
+  </form>
+
+  <PartnerDeleteButton
+  partnerId={partner.id}
+  partnerName={partner.name}
+/>
+</div>
               </div>
 
               <details className="mt-4 rounded-lg border border-slate-200 bg-slate-50">
@@ -266,11 +272,12 @@ function PartnerFormFields({
             defaultValue={defaultValues?.partner_type || "buyer"}
             className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
           >
-            <option value="buyer">판매처</option>
-            <option value="supplier">매입처</option>
-            <option value="forwarder">포워딩</option>
-            <option value="warehouse">물류/창고</option>
-            <option value="etc">기타</option>
+            <option value="all">전체</option>
+  <option value="headquarters">판매처</option>
+  <option value="wholesale">도매점</option>
+  <option value="retail">소매점</option>
+  <option value="direct_store">직영점</option>
+  <option value="etc">기타</option>
           </select>
         </div>
 
