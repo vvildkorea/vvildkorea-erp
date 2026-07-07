@@ -49,6 +49,12 @@ export async function createOrder(input: CreateOrderInput) {
     throw new Error("주문 품목을 1개 이상 입력해주세요.");
   }
 
+  const itemWithoutVariant = validItems.find((item) => !item.productVariantId);
+
+  if (itemWithoutVariant) {
+    throw new Error("주문 품목의 맛/색상을 선택해주세요.");
+  }
+
   if (orderType === "order") {
     if (!input.partnerId) {
       throw new Error("거래처를 선택해주세요.");
@@ -129,7 +135,7 @@ export async function createOrder(input: CreateOrderInput) {
     return {
       order_id: order.id,
       product_model_id: item.productModelId,
-      product_variant_id: item.productVariantId || null,
+      product_variant_id: item.productVariantId,
       product_category: item.productCategory,
       model_name: item.modelName,
       option_name: item.optionName || null,
@@ -140,12 +146,36 @@ export async function createOrder(input: CreateOrderInput) {
     };
   });
 
-  const { error: itemsError } = await supabase
+  const { data: savedOrderItems, error: itemsError } = await supabase
     .from("order_items")
-    .insert(orderItems);
+    .insert(orderItems)
+    .select("id, order_id, product_variant_id, quantity");
 
   if (itemsError) {
     throw new Error(itemsError.message);
+  }
+
+  if (!savedOrderItems || savedOrderItems.length === 0) {
+    throw new Error("주문 품목 저장 결과가 없습니다.");
+  }
+
+  const movementType = orderType === "sample" ? "sample_out" : "out";
+
+  const inventoryMovements = savedOrderItems.map((item) => ({
+    product_variant_id: item.product_variant_id,
+    order_id: item.order_id,
+    order_item_id: item.id,
+    movement_type: movementType,
+    quantity: Number(item.quantity || 0),
+    memo: orderType === "sample" ? "샘플출고" : "주문출고",
+  }));
+
+  const { error: inventoryError } = await supabase
+    .from("inventory_movements")
+    .insert(inventoryMovements);
+
+  if (inventoryError) {
+    throw new Error(inventoryError.message);
   }
 
   revalidatePath("/orders");
@@ -163,10 +193,31 @@ export async function deleteOrder(orderId: string) {
     throw new Error("삭제할 주문 ID가 없습니다.");
   }
 
-  const { error } = await supabase.from("orders").delete().eq("id", orderId);
+  const { error: inventoryDeleteError } = await supabase
+    .from("inventory_movements")
+    .delete()
+    .eq("order_id", orderId);
 
-  if (error) {
-    throw new Error(error.message);
+  if (inventoryDeleteError) {
+    throw new Error(inventoryDeleteError.message);
+  }
+
+  const { error: itemsDeleteError } = await supabase
+    .from("order_items")
+    .delete()
+    .eq("order_id", orderId);
+
+  if (itemsDeleteError) {
+    throw new Error(itemsDeleteError.message);
+  }
+
+  const { error: orderDeleteError } = await supabase
+    .from("orders")
+    .delete()
+    .eq("id", orderId);
+
+  if (orderDeleteError) {
+    throw new Error(orderDeleteError.message);
   }
 
   revalidatePath("/orders");
