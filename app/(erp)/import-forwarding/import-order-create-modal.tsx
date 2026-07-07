@@ -1,46 +1,62 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { FormEvent, useMemo, useState, useTransition } from "react";
 import { createImportOrderAction } from "./actions";
-import type { ProductCategory } from "@/lib/products";
 
 type ProductModelOption = {
   id: string;
-  category: ProductCategory;
+  category: string;
   model_name: string;
 };
 
+type ProductVariantOption = {
+  id: string;
+  product_model_id: string;
+  option_name: string;
+};
+
+type ImportOrderCreateModalProps = {
+  productModels: ProductModelOption[];
+  productVariants: ProductVariantOption[];
+};
+
 type ItemRow = {
-  id: number;
+  key: string;
+  productModelId: string;
+  productVariantId: string;
   quantity: string;
-  productCost: string;
 };
 
-type CostValues = {
-  productCostTotal: string;
-  dutyAmount: string;
-  vatAmount: string;
-  freightAmount: string;
-  customsBrokerFee: string;
-  tobaccoTaxAmount: string;
-};
-
-const categoryLabels: Record<ProductCategory, string> = {
+const categoryLabels: Record<string, string> = {
   disposable: "일회용기기",
   pod: "팟",
   device: "디바이스",
   liquid: "액상",
 };
 
-function parseNumber(value: string) {
-  if (!value.trim()) {
-    return 0;
-  }
+function createEmptyRow(): ItemRow {
+  return {
+    key: crypto.randomUUID(),
+    productModelId: "",
+    productVariantId: "",
+    quantity: "",
+  };
+}
+
+function formatCategory(category: string) {
+  return categoryLabels[category] || category || "-";
+}
+
+function toNumber(value: string) {
+  if (!value) return 0;
 
   const numberValue = Number(value.replaceAll(",", ""));
 
-  return Number.isNaN(numberValue) ? 0 : numberValue;
+  if (Number.isNaN(numberValue)) {
+    return 0;
+  }
+
+  return numberValue;
 }
 
 function formatNumber(value: number) {
@@ -49,464 +65,584 @@ function formatNumber(value: number) {
 
 export function ImportOrderCreateModal({
   productModels,
-}: {
-  productModels: ProductModelOption[];
-}) {
-  const router = useRouter();
-  const [isOpen, setIsOpen] = useState(false);
+  productVariants,
+}: ImportOrderCreateModalProps) {
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<ItemRow[]>([createEmptyRow()]);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [isPending, startTransition] = useTransition();
 
-  const [costValues, setCostValues] = useState<CostValues>({
-    productCostTotal: "",
-    dutyAmount: "",
-    vatAmount: "",
-    freightAmount: "",
-    customsBrokerFee: "",
-    tobaccoTaxAmount: "",
-  });
+  const [productCostTotal, setProductCostTotal] = useState("");
+  const [dutyAmount, setDutyAmount] = useState("");
+  const [vatAmount, setVatAmount] = useState("");
+  const [freightAmount, setFreightAmount] = useState("");
+  const [customsBrokerFee, setCustomsBrokerFee] = useState("");
+  const [tobaccoTaxAmount, setTobaccoTaxAmount] = useState("");
 
-  const [itemRows, setItemRows] = useState<ItemRow[]>([
-    { id: 1, quantity: "", productCost: "" },
+  const variantMap = useMemo(() => {
+    const map = new Map<string, ProductVariantOption[]>();
+
+    productVariants.forEach((variant) => {
+      const list = map.get(variant.product_model_id) || [];
+      list.push(variant);
+      map.set(variant.product_model_id, list);
+    });
+
+    return map;
+  }, [productVariants]);
+
+  const calculated = useMemo(() => {
+    const validRows = rows
+      .map((row) => ({
+        ...row,
+        quantityNumber: toNumber(row.quantity),
+      }))
+      .filter(
+        (row) =>
+          row.productModelId &&
+          row.productVariantId &&
+          row.quantityNumber > 0
+      );
+
+    const totalQuantity = validRows.reduce(
+      (sum, row) => sum + row.quantityNumber,
+      0
+    );
+
+    const finalProductCostTotal = toNumber(productCostTotal);
+
+    const extraCostTotal =
+      toNumber(dutyAmount) +
+      toNumber(vatAmount) +
+      toNumber(freightAmount) +
+      toNumber(customsBrokerFee) +
+      toNumber(tobaccoTaxAmount);
+
+    const totalCost = finalProductCostTotal + extraCostTotal;
+
+    const rowResults = rows.map((row) => {
+      const quantity = toNumber(row.quantity);
+
+      const allocationRatio =
+        totalQuantity > 0 && quantity > 0 ? quantity / totalQuantity : 0;
+
+      const allocatedProductCost = finalProductCostTotal * allocationRatio;
+      const allocatedExtraCost = extraCostTotal * allocationRatio;
+      const landedCostTotal = allocatedProductCost + allocatedExtraCost;
+      const landedCostUnit = quantity > 0 ? landedCostTotal / quantity : 0;
+
+      return {
+        key: row.key,
+        allocatedProductCost,
+        allocatedExtraCost,
+        landedCostTotal,
+        landedCostUnit,
+      };
+    });
+
+    return {
+      totalQuantity,
+      finalProductCostTotal,
+      extraCostTotal,
+      totalCost,
+      rowResults,
+    };
+  }, [
+    rows,
+    productCostTotal,
+    dutyAmount,
+    vatAmount,
+    freightAmount,
+    customsBrokerFee,
+    tobaccoTaxAmount,
   ]);
 
-  const today = useMemo(() => {
-    return new Date().toISOString().slice(0, 10);
-  }, []);
-
-  const productCostTotal = parseNumber(costValues.productCostTotal);
-  const dutyAmount = parseNumber(costValues.dutyAmount);
-  const vatAmount = parseNumber(costValues.vatAmount);
-  const freightAmount = parseNumber(costValues.freightAmount);
-  const customsBrokerFee = parseNumber(costValues.customsBrokerFee);
-  const tobaccoTaxAmount = parseNumber(costValues.tobaccoTaxAmount);
-
-  const extraCostTotal =
-    dutyAmount +
-    vatAmount +
-    freightAmount +
-    customsBrokerFee +
-    tobaccoTaxAmount;
-
-  const itemProductCostSum = itemRows.reduce(
-    (sum, row) => sum + parseNumber(row.productCost),
-    0
-  );
-
-  const appliedProductCostTotal =
-    productCostTotal > 0 ? productCostTotal : itemProductCostSum;
-
-  const totalCost = appliedProductCostTotal + extraCostTotal;
-
-  const totalQuantity = itemRows.reduce(
-    (sum, row) => sum + parseNumber(row.quantity),
-    0
-  );
-
-  function getEstimatedUnitCost(row: ItemRow) {
-    const quantity = parseNumber(row.quantity);
-
-    if (quantity <= 0 || totalCost <= 0) {
-      return 0;
-    }
-
-    const rowProductCost = parseNumber(row.productCost);
-
-    let allocationRatio = 0;
-
-    if (itemProductCostSum > 0) {
-      allocationRatio = rowProductCost / itemProductCostSum;
-    } else if (totalQuantity > 0) {
-      allocationRatio = quantity / totalQuantity;
-    }
-
-    const allocatedTotalCost = totalCost * allocationRatio;
-
-    return allocatedTotalCost / quantity;
+  function addRow() {
+    setRows((prev) => [...prev, createEmptyRow()]);
   }
 
-  function closeModal() {
-    setIsOpen(false);
-  }
-
-  function resetForm() {
-    setCostValues({
-      productCostTotal: "",
-      dutyAmount: "",
-      vatAmount: "",
-      freightAmount: "",
-      customsBrokerFee: "",
-      tobaccoTaxAmount: "",
-    });
-    setItemRows([{ id: 1, quantity: "", productCost: "" }]);
-  }
-
-  function addItemRow() {
-    setItemRows((prev) => [
-      ...prev,
-      { id: Date.now(), quantity: "", productCost: "" },
-    ]);
-  }
-
-  function removeItemRow(id: number) {
-    setItemRows((prev) => {
-      if (prev.length === 1) {
+  function removeRow(key: string) {
+    setRows((prev) => {
+      if (prev.length <= 1) {
         return prev;
       }
 
-      return prev.filter((row) => row.id !== id);
+      return prev.filter((row) => row.key !== key);
     });
   }
 
-  function updateItemRow(
-    id: number,
-    key: "quantity" | "productCost",
+  function updateRow(
+    key: string,
+    field: "productModelId" | "productVariantId" | "quantity",
     value: string
   ) {
-    setItemRows((prev) =>
-      prev.map((row) => (row.id === id ? { ...row, [key]: value } : row))
+    setRows((prev) =>
+      prev.map((row) => {
+        if (row.key !== key) {
+          return row;
+        }
+
+        if (field === "productModelId") {
+          return {
+            ...row,
+            productModelId: value,
+            productVariantId: "",
+          };
+        }
+
+        return {
+          ...row,
+          [field]: value,
+        };
+      })
     );
   }
 
-  function updateCostValue(key: keyof CostValues, value: string) {
-    setCostValues((prev) => ({
-      ...prev,
-      [key]: value,
-    }));
+  function resetModal() {
+    setRows([createEmptyRow()]);
+    setProductCostTotal("");
+    setDutyAmount("");
+    setVatAmount("");
+    setFreightAmount("");
+    setCustomsBrokerFee("");
+    setTobaccoTaxAmount("");
+    setErrorMessage("");
+  }
+
+  function closeModal() {
+    if (isPending) return;
+
+    setOpen(false);
+    resetModal();
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+
+    setErrorMessage("");
+
+    startTransition(() => {
+      void (async () => {
+        try {
+          await createImportOrderAction(formData);
+          form.reset();
+          resetModal();
+          setOpen(false);
+        } catch (error) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : "수입 건 저장 중 오류가 발생했습니다.";
+
+          setErrorMessage(message);
+        }
+      })();
+    });
   }
 
   return (
     <>
       <button
         type="button"
-        onClick={() => setIsOpen(true)}
-        className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
+        onClick={() => setOpen(true)}
+        className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
       >
-        수입 건 생성
+        수입 건 등록
       </button>
 
-      {isOpen && (
+      {open ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="max-h-[90vh] w-full max-w-6xl overflow-y-auto rounded-2xl bg-white shadow-xl">
+          <div className="max-h-[92vh] w-full max-w-7xl overflow-y-auto rounded-2xl bg-white shadow-xl">
             <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
               <div>
-                <h2 className="text-xl font-bold text-slate-900">
-                  수입 건 생성
+                <h2 className="text-lg font-bold text-slate-900">
+                  수입 건 등록
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  수입 비용과 품목을 입력하면 모델별 도착원가가 자동 계산됩니다.
+                  비용 총액을 품목 수량 기준으로 자동 배부해 도착원가와 재고
+                  입고를 반영합니다.
                 </p>
               </div>
 
               <button
                 type="button"
                 onClick={closeModal}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
               >
                 닫기
               </button>
             </div>
 
-            <form
-              action={async (formData) => {
-                await createImportOrderAction(formData);
-                resetForm();
-                closeModal();
-                router.refresh();
-              }}
-              className="space-y-6 p-6"
-            >
-              <div className="rounded-xl border border-slate-200 bg-white p-5">
-                <h3 className="text-base font-bold text-slate-900">
-                  기본 정보
-                </h3>
+            <form onSubmit={handleSubmit} className="space-y-6 p-6">
+              {errorMessage ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                  {errorMessage}
+                </div>
+              ) : null}
+
+              <div className="grid gap-4 md:grid-cols-3">
+                <div>
+                  <label className="mb-1 block text-sm font-semibold text-slate-700">
+                    P/O 번호
+                  </label>
+                  <input
+                    name="po_number"
+                    className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm"
+                    placeholder="예: PO-202607-001"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-semibold text-slate-700">
+                    공급업체
+                  </label>
+                  <input
+                    name="supplier_name"
+                    className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm"
+                    placeholder="공급업체명"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-semibold text-slate-700">
+                    수입일자
+                  </label>
+                  <input
+                    type="date"
+                    name="import_date"
+                    className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 p-4">
+                <h3 className="font-bold text-slate-900">비용 입력</h3>
 
                 <div className="mt-4 grid gap-4 md:grid-cols-3">
                   <div>
-                    <label className="text-sm font-medium text-slate-700">
-                      P/O 번호 <span className="text-red-500">*</span>
+                    <label className="mb-1 block text-sm font-semibold text-slate-700">
+                      물건 원가 총액
                     </label>
                     <input
-                      name="po_number"
-                      required
-                      placeholder="예: PO-2026-001"
-                      className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
+                      type="number"
+                      name="product_cost_total"
+                      min={0}
+                      value={productCostTotal}
+                      onChange={(event) =>
+                        setProductCostTotal(event.target.value)
+                      }
+                      className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm"
+                      placeholder="예: 총 송금액"
                     />
                   </div>
 
                   <div>
-                    <label className="text-sm font-medium text-slate-700">
-                      공급업체
+                    <label className="mb-1 block text-sm font-semibold text-slate-700">
+                      관세
                     </label>
                     <input
-                      name="supplier_name"
-                      placeholder="공급업체명"
-                      className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
+                      type="number"
+                      name="duty_amount"
+                      min={0}
+                      value={dutyAmount}
+                      onChange={(event) => setDutyAmount(event.target.value)}
+                      className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm"
+                      placeholder="0"
                     />
                   </div>
 
                   <div>
-                    <label className="text-sm font-medium text-slate-700">
-                      수입일자
+                    <label className="mb-1 block text-sm font-semibold text-slate-700">
+                      부가세
                     </label>
                     <input
-                      name="import_date"
-                      type="date"
-                      defaultValue={today}
-                      className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
+                      type="number"
+                      name="vat_amount"
+                      min={0}
+                      value={vatAmount}
+                      onChange={(event) => setVatAmount(event.target.value)}
+                      className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm"
+                      placeholder="0"
                     />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-semibold text-slate-700">
+                      운송비
+                    </label>
+                    <input
+                      type="number"
+                      name="freight_amount"
+                      min={0}
+                      value={freightAmount}
+                      onChange={(event) => setFreightAmount(event.target.value)}
+                      className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm"
+                      placeholder="0"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-semibold text-slate-700">
+                      관세사 비용
+                    </label>
+                    <input
+                      type="number"
+                      name="customs_broker_fee"
+                      min={0}
+                      value={customsBrokerFee}
+                      onChange={(event) =>
+                        setCustomsBrokerFee(event.target.value)
+                      }
+                      className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm"
+                      placeholder="0"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-semibold text-slate-700">
+                      담배별 세금
+                    </label>
+                    <input
+                      type="number"
+                      name="tobacco_tax_amount"
+                      min={0}
+                      value={tobaccoTaxAmount}
+                      onChange={(event) =>
+                        setTobaccoTaxAmount(event.target.value)
+                      }
+                      className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm"
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-4">
+                  <div className="rounded-lg bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">총 수량</p>
+                    <p className="mt-1 font-bold text-slate-900">
+                      {formatNumber(calculated.totalQuantity)}
+                    </p>
+                  </div>
+
+                  <div className="rounded-lg bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">물건 원가 총액</p>
+                    <p className="mt-1 font-bold text-slate-900">
+                      {formatNumber(calculated.finalProductCostTotal)}
+                    </p>
+                  </div>
+
+                  <div className="rounded-lg bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">부대비용 합계</p>
+                    <p className="mt-1 font-bold text-slate-900">
+                      {formatNumber(calculated.extraCostTotal)}
+                    </p>
+                  </div>
+
+                  <div className="rounded-lg bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">총 도착금액</p>
+                    <p className="mt-1 font-bold text-slate-900">
+                      {formatNumber(calculated.totalCost)}
+                    </p>
                   </div>
                 </div>
               </div>
 
-              <div className="rounded-xl border border-slate-200 bg-white p-5">
-                <h3 className="text-base font-bold text-slate-900">
-                  비용 분할
-                </h3>
-                <p className="mt-1 text-sm text-slate-500">
-                  모든 비용이 자동 합산되고, 품목 수량 기준으로 예상 도착원가가 계산됩니다.
-                </p>
-
-                <div className="mt-4 grid gap-4 md:grid-cols-3">
-                  <MoneyInput
-                    name="product_cost_total"
-                    label="물건 원가 총액"
-                    value={costValues.productCostTotal}
-                    onChange={(value) =>
-                      updateCostValue("productCostTotal", value)
-                    }
-                  />
-                  <MoneyInput
-                    name="duty_amount"
-                    label="관세"
-                    value={costValues.dutyAmount}
-                    onChange={(value) => updateCostValue("dutyAmount", value)}
-                  />
-                  <MoneyInput
-                    name="vat_amount"
-                    label="부가세"
-                    value={costValues.vatAmount}
-                    onChange={(value) => updateCostValue("vatAmount", value)}
-                  />
-                  <MoneyInput
-                    name="freight_amount"
-                    label="운송비"
-                    value={costValues.freightAmount}
-                    onChange={(value) =>
-                      updateCostValue("freightAmount", value)
-                    }
-                  />
-                  <MoneyInput
-                    name="customs_broker_fee"
-                    label="관세사 비용"
-                    value={costValues.customsBrokerFee}
-                    onChange={(value) =>
-                      updateCostValue("customsBrokerFee", value)
-                    }
-                  />
-                  <MoneyInput
-                    name="tobacco_tax_amount"
-                    label="담배별 세금"
-                    value={costValues.tobaccoTaxAmount}
-                    onChange={(value) =>
-                      updateCostValue("tobaccoTaxAmount", value)
-                    }
-                  />
-                </div>
-
-                <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 px-5 py-4">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-bold text-slate-700">
-                      총 비용 자동 합산
-                    </p>
-                    <p className="text-2xl font-bold text-slate-900">
-                      ₩{formatNumber(totalCost)}
-                    </p>
-                  </div>
-
-                  <div className="mt-2 text-sm text-slate-500">
-                    물건 원가 {formatNumber(appliedProductCostTotal)} + 부대비용{" "}
-                    {formatNumber(extraCostTotal)}
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-slate-200 bg-white p-5">
-                <div className="flex items-center justify-between gap-4">
+              <div className="rounded-xl border border-slate-200">
+                <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
                   <div>
-                    <h3 className="text-base font-bold text-slate-900">
-                      수입 품목
-                    </h3>
+                    <h3 className="font-bold text-slate-900">수입 품목</h3>
                     <p className="mt-1 text-sm text-slate-500">
-                      수량을 입력하면 예상 개당 도착원가가 자동 계산됩니다.
+                      품목 수량 기준으로 물건 원가와 부대비용이 자동 배부됩니다.
                     </p>
                   </div>
 
                   <button
                     type="button"
-                    onClick={addItemRow}
-                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    onClick={addRow}
+                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                   >
-                    + 품목 추가
+                    품목 추가
                   </button>
                 </div>
 
-                <div className="mt-5 space-y-3">
-                  {itemRows.map((row, index) => {
-                    const estimatedUnitCost = getEstimatedUnitCost(row);
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[1180px] text-left text-sm">
+                    <thead className="bg-slate-50 text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3 font-medium">모델</th>
+                        <th className="px-4 py-3 font-medium">맛/색상</th>
+                        <th className="px-4 py-3 font-medium">수량</th>
+                        <th className="px-4 py-3 font-medium">
+                          배부 물건원가
+                        </th>
+                        <th className="px-4 py-3 font-medium">배부 비용</th>
+                        <th className="px-4 py-3 font-medium">총 도착금액</th>
+                        <th className="px-4 py-3 font-medium">개당 도착원가</th>
+                        <th className="px-4 py-3 font-medium">관리</th>
+                      </tr>
+                    </thead>
 
-                    return (
-                      <div
-                        key={row.id}
-                        className="rounded-xl border border-slate-200 bg-slate-50 p-4"
-                      >
-                        <div className="mb-4 flex items-center justify-between">
-                          <p className="text-sm font-bold text-slate-800">
-                            품목 {index + 1}
-                          </p>
+                    <tbody className="divide-y divide-slate-100">
+                      {rows.map((row) => {
+                        const filteredVariants =
+                          variantMap.get(row.productModelId) || [];
+                        const result = calculated.rowResults.find(
+                          (item) => item.key === row.key
+                        );
 
-                          <button
-                            type="button"
-                            onClick={() => removeItemRow(row.id)}
-                            className="text-sm font-semibold text-red-600 hover:underline"
-                          >
-                            삭제
-                          </button>
-                        </div>
+                        return (
+                          <tr key={row.key}>
+                            <td className="px-4 py-3">
+                              <select
+                                name="product_model_id"
+                                value={row.productModelId}
+                                onChange={(event) =>
+                                  updateRow(
+                                    row.key,
+                                    "productModelId",
+                                    event.target.value
+                                  )
+                                }
+                                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+                                required
+                              >
+                                <option value="">모델 선택</option>
+                                {productModels.map((model) => (
+                                  <option key={model.id} value={model.id}>
+                                    [{formatCategory(model.category)}]{" "}
+                                    {model.model_name}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
 
-                        <div className="grid gap-4 md:grid-cols-[1fr_140px_180px_180px]">
-                          <div>
-                            <label className="text-sm font-medium text-slate-700">
-                              제품 모델
-                            </label>
-                            <select
-                              name="product_model_id"
-                              required
-                              className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
-                            >
-                              <option value="">제품 모델 선택</option>
-                              {productModels.map((model) => (
-                                <option key={model.id} value={model.id}>
-                                  [{categoryLabels[model.category]}]{" "}
-                                  {model.model_name}
+                            <td className="px-4 py-3">
+                              <select
+                                name="product_variant_id"
+                                value={row.productVariantId}
+                                onChange={(event) =>
+                                  updateRow(
+                                    row.key,
+                                    "productVariantId",
+                                    event.target.value
+                                  )
+                                }
+                                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+                                required
+                                disabled={!row.productModelId}
+                              >
+                                <option value="">
+                                  {row.productModelId
+                                    ? "맛/색상 선택"
+                                    : "모델 먼저 선택"}
                                 </option>
-                              ))}
-                            </select>
-                          </div>
 
-                          <div>
-                            <label className="text-sm font-medium text-slate-700">
-                              수량
-                            </label>
-                            <input
-                              name="quantity"
-                              type="number"
-                              min="0"
-                              value={row.quantity}
-                              onChange={(event) =>
-                                updateItemRow(
-                                  row.id,
-                                  "quantity",
-                                  event.target.value
-                                )
-                              }
-                              placeholder="0"
-                              className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
-                            />
-                          </div>
+                                {filteredVariants.map((variant) => (
+                                  <option key={variant.id} value={variant.id}>
+                                    {variant.option_name}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
 
-                          <div>
-                            <label className="text-sm font-medium text-slate-700">
-                              송금 금액
-                            </label>
-                            <input
-                              name="product_cost"
-                              type="number"
-                              min="0"
-                              value={row.productCost}
-                              onChange={(event) =>
-                                updateItemRow(
-                                  row.id,
-                                  "productCost",
-                                  event.target.value
-                                )
-                              }
-                              placeholder="0"
-                              className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
-                            />
-                          </div>
+                            <td className="px-4 py-3">
+                              <input
+                                type="number"
+                                name="quantity"
+                                min={1}
+                                value={row.quantity}
+                                onChange={(event) =>
+                                  updateRow(
+                                    row.key,
+                                    "quantity",
+                                    event.target.value
+                                  )
+                                }
+                                className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm"
+                                placeholder="수량"
+                                required
+                              />
 
-                          <div>
-                            <label className="text-sm font-medium text-slate-700">
-                              예상 도착원가
-                            </label>
-                            <div className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-900">
-                              ₩{formatNumber(estimatedUnitCost)}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                              <input
+                                type="hidden"
+                                name="product_cost"
+                                value="0"
+                              />
+                            </td>
+
+                            <td className="px-4 py-3 text-slate-600">
+                              {formatNumber(
+                                result?.allocatedProductCost || 0
+                              )}
+                            </td>
+
+                            <td className="px-4 py-3 text-slate-600">
+                              {formatNumber(result?.allocatedExtraCost || 0)}
+                            </td>
+
+                            <td className="px-4 py-3 text-slate-600">
+                              {formatNumber(result?.landedCostTotal || 0)}
+                            </td>
+
+                            <td className="px-4 py-3 font-bold text-slate-900">
+                              {formatNumber(result?.landedCostUnit || 0)}
+                            </td>
+
+                            <td className="px-4 py-3">
+                              <button
+                                type="button"
+                                onClick={() => removeRow(row.key)}
+                                className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
+                              >
+                                삭제
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
-              <div className="rounded-xl border border-slate-200 bg-white p-5">
-                <label className="text-sm font-medium text-slate-700">
-                  비고
+              <div>
+                <label className="mb-1 block text-sm font-semibold text-slate-700">
+                  메모
                 </label>
-                <input
+                <textarea
                   name="memo"
-                  placeholder="메모 입력"
-                  className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
+                  rows={3}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  placeholder="메모"
                 />
               </div>
 
-              <div className="flex justify-end gap-2 border-t border-slate-200 pt-5">
+              <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
                 <button
                   type="button"
                   onClick={closeModal}
-                  className="rounded-lg border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  disabled={isPending}
                 >
                   취소
                 </button>
 
                 <button
                   type="submit"
-                  className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
+                  disabled={isPending}
                 >
-                  수입 건 생성
+                  {isPending ? "저장 중..." : "저장"}
                 </button>
               </div>
             </form>
           </div>
         </div>
-      )}
+      ) : null}
     </>
-  );
-}
-
-function MoneyInput({
-  name,
-  label,
-  value,
-  onChange,
-}: {
-  name: string;
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div>
-      <label className="text-sm font-medium text-slate-700">{label}</label>
-      <input
-        name={name}
-        type="number"
-        min="0"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder="0"
-        className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
-      />
-    </div>
   );
 }

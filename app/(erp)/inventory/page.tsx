@@ -50,7 +50,7 @@ export default async function InventoryPage() {
         .from("inventory_movements")
         .select("*")
         .order("created_at", { ascending: false })
-        .limit(500),
+        .limit(5000),
     ]);
 
   const variants = (variantsResult.data || []) as DbRow[];
@@ -195,6 +195,10 @@ export default async function InventoryPage() {
   const movementRows = movements.map((movement) => {
     const productVariantId = String(movement.product_variant_id || "");
     const variantInfo = variantInfoMap.get(productVariantId);
+    const orderId = movement.order_id ? String(movement.order_id) : null;
+    const importOrderId = movement.import_order_id
+      ? String(movement.import_order_id)
+      : null;
 
     return {
       id: String(movement.id),
@@ -206,6 +210,9 @@ export default async function InventoryPage() {
       movementType: movement.movement_type || null,
       quantity: Number(movement.quantity || 0),
       memo: movement.memo || null,
+      orderId,
+      importOrderId,
+      editable: !orderId && !importOrderId,
     };
   });
 
@@ -300,8 +307,8 @@ export default async function InventoryPage() {
       <div className="rounded-xl border bg-blue-50 p-4 text-sm text-blue-800">
         <p className="font-semibold">재고 기준</p>
         <p className="mt-1">
-          현재재고는 입고, 반품, 재고조정을 합산한 수량입니다. 실재고는
-          주문출고와 샘플출고를 차감한 실제 남은 수량입니다.
+          입고와 반품입고는 재고가 증가합니다. 재고차감은 분실, 파손,
+          입력오류 보정처럼 재고를 줄일 때 사용합니다.
         </p>
       </div>
 

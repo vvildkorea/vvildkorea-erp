@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import {
   createBulkInventoryInMovements,
   createInventoryMovement,
+  updateInventoryMovement,
 } from "./actions";
 
 type InventoryRow = {
@@ -25,6 +26,9 @@ type MovementRow = {
   movementType: string | null;
   quantity: number;
   memo: string | null;
+  orderId: string | null;
+  importOrderId: string | null;
+  editable: boolean;
 };
 
 type InventoryClientProps = {
@@ -60,16 +64,33 @@ function formatDate(value: string | null | undefined) {
   });
 }
 
-function getMovementLabel(type: string | null | undefined) {
+function getMovementLabel(type: string | null | undefined, quantity?: number) {
+  if (type === "adjustment" && Number(quantity || 0) < 0) {
+    return "재고차감";
+  }
+
+  if (type === "adjustment" && Number(quantity || 0) > 0) {
+    return "재고증가";
+  }
+
   const labels: Record<string, string> = {
     in: "입고",
     out: "주문출고",
     sample_out: "샘플출고",
     adjustment: "재고조정",
-    return: "반품",
+    return: "반품입고",
   };
 
   return labels[type || ""] || "-";
+}
+
+function getMovementActionValue(type: string | null | undefined, quantity: number) {
+  if (type === "in") return "in";
+  if (type === "return") return "return";
+  if (type === "adjustment" && quantity < 0) return "adjustment_out";
+  if (type === "adjustment") return "adjustment_in";
+
+  return "in";
 }
 
 function getActualQuantityClass(quantity: number) {
@@ -83,6 +104,12 @@ function getStockRateClass(rate: number, baseQuantity: number) {
   if (rate <= 0) return "text-red-600";
   if (rate <= 20) return "text-yellow-600";
   return "text-emerald-700";
+}
+
+function getSourceLabel(movement: MovementRow) {
+  if (movement.orderId) return "주문 자동";
+  if (movement.importOrderId) return "수입 자동";
+  return "수동 입력";
 }
 
 export default function InventoryClient({
@@ -288,7 +315,7 @@ export default function InventoryClient({
                         : formatPercent(row.stockRate)}
                     </td>
 
-                    <td className="min-w-[420px] px-4 py-3">
+                    <td className="min-w-[460px] px-4 py-3">
                       <form
                         action={createInventoryMovement}
                         className="flex items-center gap-2"
@@ -305,13 +332,15 @@ export default function InventoryClient({
                           className="h-9 rounded-md border border-gray-300 bg-white px-2 text-sm"
                         >
                           <option value="in">입고</option>
-                          <option value="return">반품</option>
-                          <option value="adjustment">조정</option>
+                          <option value="return">반품입고</option>
+                          <option value="adjustment_in">재고증가</option>
+                          <option value="adjustment_out">재고차감</option>
                         </select>
 
                         <input
                           type="number"
                           name="quantity"
+                          min={1}
                           placeholder="수량"
                           className="h-9 w-24 rounded-md border border-gray-300 px-2 text-sm"
                           required
@@ -346,7 +375,8 @@ export default function InventoryClient({
             최근 재고 이력
           </h2>
           <p className="mt-1 text-sm text-gray-500">
-            최근 500개 이력 중 최신순으로 표시됩니다.
+            수동 입력한 입고, 반품입고, 재고증가, 재고차감 이력은 수량을
+            수정할 수 있습니다.
           </p>
         </div>
 
@@ -369,6 +399,9 @@ export default function InventoryClient({
                     맛/색상
                   </th>
                   <th className="whitespace-nowrap px-4 py-3 text-left font-semibold text-gray-600">
+                    출처
+                  </th>
+                  <th className="whitespace-nowrap px-4 py-3 text-left font-semibold text-gray-600">
                     구분
                   </th>
                   <th className="whitespace-nowrap px-4 py-3 text-right font-semibold text-gray-600">
@@ -377,11 +410,14 @@ export default function InventoryClient({
                   <th className="whitespace-nowrap px-4 py-3 text-left font-semibold text-gray-600">
                     메모
                   </th>
+                  <th className="whitespace-nowrap px-4 py-3 text-left font-semibold text-gray-600">
+                    수정
+                  </th>
                 </tr>
               </thead>
 
               <tbody className="divide-y divide-gray-100 bg-white">
-                {movements.slice(0, 50).map((movement) => (
+                {movements.slice(0, 80).map((movement) => (
                   <tr key={movement.id} className="hover:bg-gray-50">
                     <td className="whitespace-nowrap px-4 py-3 text-gray-700">
                       {formatDate(movement.createdAt)}
@@ -396,7 +432,14 @@ export default function InventoryClient({
                     </td>
 
                     <td className="whitespace-nowrap px-4 py-3 text-gray-700">
-                      {getMovementLabel(movement.movementType)}
+                      {getSourceLabel(movement)}
+                    </td>
+
+                    <td className="whitespace-nowrap px-4 py-3 text-gray-700">
+                      {getMovementLabel(
+                        movement.movementType,
+                        movement.quantity
+                      )}
                     </td>
 
                     <td className="whitespace-nowrap px-4 py-3 text-right font-semibold text-gray-900">
@@ -405,6 +448,63 @@ export default function InventoryClient({
 
                     <td className="whitespace-nowrap px-4 py-3 text-gray-700">
                       {movement.memo || "-"}
+                    </td>
+
+                    <td className="min-w-[430px] px-4 py-3">
+                      {movement.editable ? (
+                        <form
+                          action={updateInventoryMovement}
+                          className="flex items-center gap-2"
+                        >
+                          <input
+                            type="hidden"
+                            name="movementId"
+                            value={movement.id}
+                          />
+
+                          <select
+                            name="movementType"
+                            defaultValue={getMovementActionValue(
+                              movement.movementType,
+                              movement.quantity
+                            )}
+                            className="h-9 rounded-md border border-gray-300 bg-white px-2 text-sm"
+                          >
+                            <option value="in">입고</option>
+                            <option value="return">반품입고</option>
+                            <option value="adjustment_in">재고증가</option>
+                            <option value="adjustment_out">재고차감</option>
+                          </select>
+
+                          <input
+                            type="number"
+                            name="quantity"
+                            min={1}
+                            defaultValue={Math.abs(movement.quantity)}
+                            className="h-9 w-24 rounded-md border border-gray-300 px-2 text-sm"
+                            required
+                          />
+
+                          <input
+                            type="text"
+                            name="memo"
+                            defaultValue={movement.memo || ""}
+                            className="h-9 w-36 rounded-md border border-gray-300 px-2 text-sm"
+                            placeholder="메모"
+                          />
+
+                          <button
+                            type="submit"
+                            className="h-9 rounded-md bg-slate-700 px-3 text-sm font-semibold text-white hover:bg-slate-900"
+                          >
+                            수정
+                          </button>
+                        </form>
+                      ) : (
+                        <span className="text-xs text-gray-400">
+                          자동 생성 이력
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}

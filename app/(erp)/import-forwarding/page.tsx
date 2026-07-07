@@ -1,6 +1,8 @@
 import { ImportOrderCreateModal } from "./import-order-create-modal";
+import { ImportOrderDeleteButton } from "./import-order-delete-button";
 import { getImportOrders } from "@/lib/imports";
 import { getProductModels, type ProductCategory } from "@/lib/products";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 const categoryLabels: Record<ProductCategory, string> = {
   disposable: "일회용기기",
@@ -8,6 +10,8 @@ const categoryLabels: Record<ProductCategory, string> = {
   device: "디바이스",
   liquid: "액상",
 };
+
+type DbRow = Record<string, any>;
 
 function formatNumber(value: number | null | undefined) {
   if (value === null || value === undefined) {
@@ -17,18 +21,50 @@ function formatNumber(value: number | null | undefined) {
   return Number(value).toLocaleString("ko-KR");
 }
 
+function getVariantLabel(variant: DbRow | null | undefined) {
+  if (!variant) return "-";
+
+  const keys = ["option_name", "variant_name", "flavor", "color", "name"];
+
+  for (const key of keys) {
+    const value = variant[key];
+
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      return String(value);
+    }
+  }
+
+  return "-";
+}
+
 export default async function ImportForwardingPage() {
-  const [importOrders, productModels] = await Promise.all([
-    getImportOrders(),
-    getProductModels({
-      active: "active",
-    }),
-  ]);
+  const [importOrders, productModels, productVariantsResult] =
+    await Promise.all([
+      getImportOrders(),
+      getProductModels({
+        active: "active",
+      }),
+      supabaseAdmin.from("product_variants").select("*"),
+    ]);
+
+  if (productVariantsResult.error) {
+    throw new Error(productVariantsResult.error.message);
+  }
+
+  const productVariants = (productVariantsResult.data || []) as DbRow[];
 
   const productModelOptions = productModels.map((model) => ({
     id: model.id,
     category: model.category,
     model_name: model.model_name,
+  }));
+
+  const productVariantOptions = productVariants.map((variant) => ({
+    id: String(variant.id),
+    product_model_id: String(
+      variant.product_model_id || variant.model_id || variant.product_id || ""
+    ),
+    option_name: getVariantLabel(variant),
   }));
 
   return (
@@ -38,11 +74,15 @@ export default async function ImportForwardingPage() {
           <div>
             <h1 className="text-2xl font-bold">수입/포워딩</h1>
             <p className="mt-2 text-sm text-slate-500">
-              수입 비용을 등록하고 모델별 도착원가를 자동 계산합니다.
+              수입 비용을 등록하고 맛/색상별 도착원가와 재고 입고를 자동
+              반영합니다.
             </p>
           </div>
 
-          <ImportOrderCreateModal productModels={productModelOptions} />
+          <ImportOrderCreateModal
+            productModels={productModelOptions}
+            productVariants={productVariantOptions}
+          />
         </div>
       </div>
 
@@ -60,21 +100,30 @@ export default async function ImportForwardingPage() {
               <div key={order.id} className="p-6">
                 <div className="grid gap-4 md:grid-cols-[1fr_280px]">
                   <div>
-                    <p className="text-lg font-bold text-slate-900">
-                      {order.po_number}
-                    </p>
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <p className="text-lg font-bold text-slate-900">
+                          {order.po_number}
+                        </p>
 
-                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500">
-                      <span>공급업체: {order.supplier_name || "-"}</span>
-                      <span>수입일자: {order.import_date || "-"}</span>
-                      <span>품목: {items.length}개</span>
+                        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500">
+                          <span>공급업체: {order.supplier_name || "-"}</span>
+                          <span>수입일자: {order.import_date || "-"}</span>
+                          <span>품목: {items.length}개</span>
+                        </div>
+
+                        {order.memo && (
+                          <p className="mt-2 text-sm text-slate-500">
+                            메모: {order.memo}
+                          </p>
+                        )}
+                      </div>
+
+                      <ImportOrderDeleteButton
+                        importOrderId={order.id}
+                        poNumber={order.po_number}
+                      />
                     </div>
-
-                    {order.memo && (
-                      <p className="mt-2 text-sm text-slate-500">
-                        메모: {order.memo}
-                      </p>
-                    )}
                   </div>
 
                   <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
@@ -91,12 +140,13 @@ export default async function ImportForwardingPage() {
                 </div>
 
                 <div className="mt-5 overflow-hidden rounded-xl border border-slate-200">
-                  <table className="w-full min-w-[900px] text-left text-sm">
+                  <table className="w-full min-w-[980px] text-left text-sm">
                     <thead className="bg-slate-50 text-slate-500">
                       <tr>
                         <th className="px-4 py-3 font-medium">모델</th>
+                        <th className="px-4 py-3 font-medium">맛/색상</th>
                         <th className="px-4 py-3 font-medium">수량</th>
-                        <th className="px-4 py-3 font-medium">송금 금액</th>
+                        <th className="px-4 py-3 font-medium">배부 물건원가</th>
                         <th className="px-4 py-3 font-medium">배부 비용</th>
                         <th className="px-4 py-3 font-medium">총 도착금액</th>
                         <th className="px-4 py-3 font-medium">개당 도착원가</th>
@@ -122,18 +172,27 @@ export default async function ImportForwardingPage() {
                               "-"
                             )}
                           </td>
+
+                          <td className="px-4 py-3 text-slate-600">
+                            {getVariantLabel(item.product_variants as DbRow)}
+                          </td>
+
                           <td className="px-4 py-3 text-slate-600">
                             {formatNumber(item.quantity)}
                           </td>
+
                           <td className="px-4 py-3 text-slate-600">
                             {formatNumber(item.product_cost)}
                           </td>
+
                           <td className="px-4 py-3 text-slate-600">
                             {formatNumber(item.allocated_extra_cost)}
                           </td>
+
                           <td className="px-4 py-3 text-slate-600">
                             {formatNumber(item.landed_cost_total)}
                           </td>
+
                           <td className="px-4 py-3 font-bold text-slate-900">
                             {formatNumber(item.landed_cost_unit)}
                           </td>
@@ -143,7 +202,7 @@ export default async function ImportForwardingPage() {
                       {items.length === 0 && (
                         <tr>
                           <td
-                            colSpan={6}
+                            colSpan={7}
                             className="px-4 py-8 text-center text-slate-400"
                           >
                             등록된 품목이 없습니다.
