@@ -8,6 +8,14 @@ const editableRoles = ["owner", "admin", "staff", "viewer", "pending"] as const;
 
 type OperatorRole = (typeof editableRoles)[number];
 
+type OperatorWithPermissions = {
+  id: string;
+  email: string;
+  role: OperatorRole;
+  is_active?: boolean | null;
+  can_access_operators?: boolean | null;
+};
+
 function isOperatorRole(value: string): value is OperatorRole {
   return editableRoles.includes(value as OperatorRole);
 }
@@ -17,7 +25,8 @@ function getBooleanValue(formData: FormData, key: string) {
 }
 
 export async function updateOperatorPermissions(formData: FormData) {
-  const currentOperator = await syncCurrentOperator();
+  const currentOperator =
+    (await syncCurrentOperator()) as OperatorWithPermissions | null;
 
   if (!currentOperator) {
     throw new Error("로그인 정보를 확인할 수 없습니다.");
@@ -53,7 +62,9 @@ export async function updateOperatorPermissions(formData: FormData) {
     throw new Error("수정할 운영자를 찾을 수 없습니다.");
   }
 
-  if (currentOperator.role !== "owner" && targetOperator.role === "owner") {
+  const targetRole = String(targetOperator.role ?? "") as OperatorRole;
+
+  if (currentOperator.role !== "owner" && targetRole === "owner") {
     throw new Error("최고관리자 권한은 최고관리자만 수정할 수 있습니다.");
   }
 
