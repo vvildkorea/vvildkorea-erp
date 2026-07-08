@@ -1,93 +1,52 @@
-import { createClient } from "@/lib/supabase/server";
 import AccountingClient from "./accounting-client";
+import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-type AnyRow = Record<string, any>;
-
-export default async function AccountingNetworkPage() {
+async function getTableData(tableName: string) {
   const supabase = await createClient();
 
-  const currentYear = new Date().getFullYear();
+  const { data, error } = await supabase.from(tableName).select("*");
 
+  if (error) {
+    console.error(`[accounting-network] ${tableName} load error:`, error);
+    return [];
+  }
+
+  return data ?? [];
+}
+
+export default async function AccountingNetworkPage() {
   const [
-    invoicesResult,
-    partnersResult,
-    invoiceOrdersResult,
-    ordersResult,
-    orderItemsResult,
-    headquartersPricesResult,
+    partners,
+    orders,
+    orderItems,
+    productVariantPrices,
+    taxInvoices,
+    taxInvoiceOrders,
+    taxInvoicePayments,
+    taxInvoiceSummary,
   ] = await Promise.all([
-    supabase
-      .from("tax_invoice_summary")
-      .select("*")
-      .order("issue_date", { ascending: false })
-      .order("created_at", { ascending: false }),
-
-    supabase.from("partners").select("*"),
-
-    supabase.from("tax_invoice_orders").select("*"),
-
-    supabase.from("orders").select("*"),
-
-    supabase.from("order_items").select("*"),
-
-    supabase
-      .from("product_variant_prices")
-      .select("*")
-      .eq("partner_type", "headquarters"),
+    getTableData("partners"),
+    getTableData("orders"),
+    getTableData("order_items"),
+    getTableData("product_variant_prices"),
+    getTableData("tax_invoices"),
+    getTableData("tax_invoice_orders"),
+    getTableData("tax_invoice_payments"),
+    getTableData("tax_invoice_summary"),
   ]);
-
-  if (invoicesResult.error) {
-    console.error("tax_invoice_summary error", invoicesResult.error.message);
-  }
-
-  if (partnersResult.error) {
-    console.error("partners error", partnersResult.error.message);
-  }
-
-  if (invoiceOrdersResult.error) {
-    console.error("tax_invoice_orders error", invoiceOrdersResult.error.message);
-  }
-
-  if (ordersResult.error) {
-    console.error("orders error", ordersResult.error.message);
-  }
-
-  if (orderItemsResult.error) {
-    console.error("order_items error", orderItemsResult.error.message);
-  }
-
-  if (headquartersPricesResult.error) {
-    console.error(
-      "product_variant_prices error",
-      headquartersPricesResult.error.message
-    );
-  }
-
-  const invoices = (invoicesResult.data ?? []) as AnyRow[];
-  const partners = (partnersResult.data ?? []) as AnyRow[];
-  const invoiceOrderLinks = (invoiceOrdersResult.data ?? []) as AnyRow[];
-  const orders = (ordersResult.data ?? []) as AnyRow[];
-  const orderItems = (orderItemsResult.data ?? []) as AnyRow[];
-  const headquartersPrices = (headquartersPricesResult.data ?? []) as AnyRow[];
-
-  const thisYearInvoiceCount = invoices.filter((invoice) =>
-    String(invoice.issue_date ?? "").startsWith(String(currentYear))
-  ).length;
-
-  const defaultInvoiceNumber = `${currentYear}-${thisYearInvoiceCount + 1}`;
 
   return (
     <AccountingClient
-      currentYear={currentYear}
-      defaultInvoiceNumber={defaultInvoiceNumber}
-      invoices={invoices}
       partners={partners}
-      invoiceOrderLinks={invoiceOrderLinks}
       orders={orders}
       orderItems={orderItems}
-      headquartersPrices={headquartersPrices}
+      productVariantPrices={productVariantPrices}
+      taxInvoices={taxInvoices}
+      taxInvoiceOrders={taxInvoiceOrders}
+      taxInvoicePayments={taxInvoicePayments}
+      taxInvoiceSummary={taxInvoiceSummary}
     />
   );
 }

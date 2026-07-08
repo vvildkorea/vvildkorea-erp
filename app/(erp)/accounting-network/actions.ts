@@ -3,167 +3,529 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
-function toNumber(value: FormDataEntryValue | null) {
-  if (value === null) return 0;
+const ACCOUNTING_PATH = "/accounting-network";
 
-  const text = String(value)
-    .replaceAll(",", "")
-    .replaceAll("₩", "")
-    .trim();
+export type ActionResult = {
+  ok: boolean;
+  message: string;
+};
 
-  const numberValue = Number(text);
-  return Number.isFinite(numberValue) ? numberValue : 0;
+export type TaxInvoiceInput = {
+  invoice_number: string;
+  issue_date: string;
+  partner_id: string;
+  order_ids: string[];
+  memo?: string;
+  paid_full?: boolean;
+};
+
+export type TaxInvoiceUpdateInput = TaxInvoiceInput & {
+  id: string;
+};
+
+export type PaymentInput = {
+  tax_invoice_id: string;
+  payment_date: string;
+  amount: number;
+  memo?: string;
+};
+
+export type PaymentUpdateInput = PaymentInput & {
+  id: string;
+};
+
+function cleanString(value: unknown) {
+  if (typeof value !== "string") return "";
+  return value.trim();
 }
 
-function toStringValue(value: FormDataEntryValue | null) {
-  return String(value ?? "").trim();
+function toNumber(value: unknown) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
 }
 
-function parseOrderIds(value: FormDataEntryValue | null) {
-  try {
-    const parsed = JSON.parse(String(value ?? "[]"));
-    if (!Array.isArray(parsed)) return [];
+function getRecordAmount(record: Record<string, unknown>) {
+  const candidates = [
+    "total_amount",
+    "order_total",
+    "final_amount",
+    "sales_amount",
+    "amount",
+    "total_price",
+    "supply_amount",
+  ];
 
-    return parsed
-      .map((item) => String(item))
-      .filter((item) => item.length > 0);
-  } catch {
-    return [];
+  for (const key of candidates) {
+    const value = toNumber(record[key]);
+    if (value > 0) return value;
   }
+
+  return 0;
 }
 
-export async function createTaxInvoiceAction(formData: FormData) {
-  const supabase = await createClient();
+async function getSupabase() {
+  return await createClient();
+}
 
-  const invoice_number = toStringValue(formData.get("invoice_number"));
-  const partner_id = toStringValue(formData.get("partner_id"));
-  const issue_date = toStringValue(formData.get("issue_date"));
-  const total_amount = toNumber(formData.get("total_amount"));
-  const memo = toStringValue(formData.get("memo"));
-  const orderIds = parseOrderIds(formData.get("order_ids"));
+async function calculateOrderTotal(orderIds: string[]) {
+  if (orderIds.length === 0) return 0;
 
-  const is_paid_on_create =
-    toStringValue(formData.get("is_paid_on_create")) === "on";
+  const supabase = await getSupabase();
 
-  const payment_date = toStringValue(formData.get("payment_date"));
-  const payment_method =
-    toStringValue(formData.get("payment_method")) || "계좌이체";
-
-  if (!invoice_number) {
-    throw new Error("계산서 번호를 입력해주세요.");
-  }
-
-  if (!partner_id) {
-    throw new Error("거래처를 선택해주세요.");
-  }
-
-  if (orderIds.length === 0) {
-    throw new Error("연결 주문을 선택해주세요.");
-  }
-
-  if (total_amount <= 0) {
-    throw new Error("연결 주문의 합계금액이 0원입니다.");
-  }
-
-  const { data: invoice, error } = await supabase
-    .from("tax_invoices")
-    .insert({
-      invoice_number,
-      partner_id,
-      issue_date: issue_date || new Date().toISOString().slice(0, 10),
-      total_amount,
-      memo: memo || null,
-    })
-    .select("id")
-    .single();
+  const { data, error } = await supabase
+    .from("orders")
+    .select("*")
+    .in("id", orderIds);
 
   if (error) {
-    throw new Error(error.message);
+    throw new Error(`연결 주문 금액을 불러오지 못했습니다. ${error.message}`);
   }
 
-  if (invoice?.id && orderIds.length > 0) {
-    const rows = orderIds.map((order_id) => ({
-      tax_invoice_id: invoice.id,
-      order_id,
+  return (data ?? []).reduce((sum, order) => {
+    return sum + getRecordAmount(order as Record<string, unknown>);
+  }, 0);
+}
+
+async function rollbackInvoice(invoiceId: string) {
+  const supabase = await getSupabase();
+
+  await supabase
+    .from("tax_invoice_payments")
+    .delete()
+    .eq("tax_invoice_id", invoiceId);
+
+  await supabase
+    .from("tax_invoice_orders")
+    .delete()
+    .eq("tax_invoice_id", invoiceId);
+
+  await supabase.from("tax_invoices").delete().eq("id", invoiceId);
+}
+
+export async function createTaxInvoice(
+  input: TaxInvoiceInput,
+): Promise<ActionResult> {
+  try {
+    const invoiceNumber = cleanString(input.invoice_number);
+    const issueDate = cleanString(input.issue_date);
+    const partnerId = cleanString(input.partner_id);
+    const memo = cleanString(input.memo);
+    const orderIds = Array.isArray(input.order_ids)
+      ? input.order_ids.filter(Boolean)
+      : [];
+
+    if (!invoiceNumber) {
+      return { ok: false, message: "계산서 번호를 입력해주세요." };
+    }
+
+    if (!issueDate) {
+      return { ok: false, message: "발행일을 선택해주세요." };
+    }
+
+    if (!partnerId) {
+      return { ok: false, message: "거래처를 선택해주세요." };
+    }
+
+    if (orderIds.length === 0) {
+      return { ok: false, message: "연결할 주문을 1개 이상 선택해주세요." };
+    }
+
+    const totalAmount = await calculateOrderTotal(orderIds);
+    const supabase = await getSupabase();
+
+    const { data: invoice, error: invoiceError } = await supabase
+      .from("tax_invoices")
+      .insert({
+        invoice_number: invoiceNumber,
+        issue_date: issueDate,
+        partner_id: partnerId,
+        total_amount: totalAmount,
+        memo,
+      })
+      .select("id")
+      .single();
+
+    if (invoiceError || !invoice?.id) {
+      return {
+        ok: false,
+        message: `세금계산서 등록에 실패했습니다. ${
+          invoiceError?.message ?? ""
+        }`,
+      };
+    }
+
+    const invoiceId = invoice.id as string;
+
+    const orderRows = orderIds.map((orderId) => ({
+      tax_invoice_id: invoiceId,
+      order_id: orderId,
     }));
 
-    const { error: linkError } = await supabase
+    const { error: orderLinkError } = await supabase
       .from("tax_invoice_orders")
-      .insert(rows);
+      .insert(orderRows);
 
-    if (linkError) {
-      throw new Error(linkError.message);
+    if (orderLinkError) {
+      await rollbackInvoice(invoiceId);
+      return {
+        ok: false,
+        message: `연결 주문 저장에 실패했습니다. ${orderLinkError.message}`,
+      };
     }
-  }
 
-  if (invoice?.id && is_paid_on_create) {
+    if (input.paid_full && totalAmount > 0) {
+      const { error: paymentError } = await supabase
+        .from("tax_invoice_payments")
+        .insert({
+          tax_invoice_id: invoiceId,
+          payment_date: issueDate,
+          amount: totalAmount,
+          memo: "등록 시 입금완료 처리",
+        });
+
+      if (paymentError) {
+        await rollbackInvoice(invoiceId);
+        return {
+          ok: false,
+          message: `입금완료 처리에 실패했습니다. ${paymentError.message}`,
+        };
+      }
+    }
+
+    revalidatePath(ACCOUNTING_PATH);
+
+    return { ok: true, message: "세금계산서가 등록되었습니다." };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error
+          ? error.message
+          : "세금계산서 등록 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+export async function updateTaxInvoice(
+  input: TaxInvoiceUpdateInput,
+): Promise<ActionResult> {
+  try {
+    const id = cleanString(input.id);
+    const invoiceNumber = cleanString(input.invoice_number);
+    const issueDate = cleanString(input.issue_date);
+    const partnerId = cleanString(input.partner_id);
+    const memo = cleanString(input.memo);
+    const orderIds = Array.isArray(input.order_ids)
+      ? input.order_ids.filter(Boolean)
+      : [];
+
+    if (!id) {
+      return { ok: false, message: "수정할 세금계산서 정보가 없습니다." };
+    }
+
+    if (!invoiceNumber) {
+      return { ok: false, message: "계산서 번호를 입력해주세요." };
+    }
+
+    if (!issueDate) {
+      return { ok: false, message: "발행일을 선택해주세요." };
+    }
+
+    if (!partnerId) {
+      return { ok: false, message: "거래처를 선택해주세요." };
+    }
+
+    if (orderIds.length === 0) {
+      return { ok: false, message: "연결할 주문을 1개 이상 선택해주세요." };
+    }
+
+    const totalAmount = await calculateOrderTotal(orderIds);
+    const supabase = await getSupabase();
+
+    const { error: updateError } = await supabase
+      .from("tax_invoices")
+      .update({
+        invoice_number: invoiceNumber,
+        issue_date: issueDate,
+        partner_id: partnerId,
+        total_amount: totalAmount,
+        memo,
+      })
+      .eq("id", id);
+
+    if (updateError) {
+      return {
+        ok: false,
+        message: `세금계산서 수정에 실패했습니다. ${updateError.message}`,
+      };
+    }
+
+    const { error: deleteLinkError } = await supabase
+      .from("tax_invoice_orders")
+      .delete()
+      .eq("tax_invoice_id", id);
+
+    if (deleteLinkError) {
+      return {
+        ok: false,
+        message: `기존 연결 주문 삭제에 실패했습니다. ${deleteLinkError.message}`,
+      };
+    }
+
+    const { error: insertLinkError } = await supabase
+      .from("tax_invoice_orders")
+      .insert(
+        orderIds.map((orderId) => ({
+          tax_invoice_id: id,
+          order_id: orderId,
+        })),
+      );
+
+    if (insertLinkError) {
+      return {
+        ok: false,
+        message: `새 연결 주문 저장에 실패했습니다. ${insertLinkError.message}`,
+      };
+    }
+
+    revalidatePath(ACCOUNTING_PATH);
+
+    return {
+      ok: true,
+      message: "세금계산서가 수정되었습니다. 입금 상태도 자동 재계산됩니다.",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error
+          ? error.message
+          : "세금계산서 수정 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+export async function deleteTaxInvoice(id: string): Promise<ActionResult> {
+  try {
+    const invoiceId = cleanString(id);
+
+    if (!invoiceId) {
+      return { ok: false, message: "삭제할 세금계산서 정보가 없습니다." };
+    }
+
+    const supabase = await getSupabase();
+
     const { error: paymentError } = await supabase
       .from("tax_invoice_payments")
-      .insert({
-        tax_invoice_id: invoice.id,
-        payment_date:
-          payment_date ||
-          issue_date ||
-          new Date().toISOString().slice(0, 10),
-        amount: total_amount,
-        payment_method,
-        memo: "세금계산서 등록 시 입금완료 처리",
-      });
+      .delete()
+      .eq("tax_invoice_id", invoiceId);
 
     if (paymentError) {
-      throw new Error(paymentError.message);
+      return {
+        ok: false,
+        message: `입금 내역 삭제에 실패했습니다. ${paymentError.message}`,
+      };
     }
-  }
 
-  revalidatePath("/accounting-network");
+    const { error: orderLinkError } = await supabase
+      .from("tax_invoice_orders")
+      .delete()
+      .eq("tax_invoice_id", invoiceId);
+
+    if (orderLinkError) {
+      return {
+        ok: false,
+        message: `연결 주문 삭제에 실패했습니다. ${orderLinkError.message}`,
+      };
+    }
+
+    const { error: invoiceError } = await supabase
+      .from("tax_invoices")
+      .delete()
+      .eq("id", invoiceId);
+
+    if (invoiceError) {
+      return {
+        ok: false,
+        message: `세금계산서 삭제에 실패했습니다. ${invoiceError.message}`,
+      };
+    }
+
+    revalidatePath(ACCOUNTING_PATH);
+
+    return { ok: true, message: "세금계산서가 삭제되었습니다." };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error
+          ? error.message
+          : "세금계산서 삭제 중 오류가 발생했습니다.",
+    };
+  }
 }
 
-export async function createTaxInvoicePaymentAction(formData: FormData) {
-  const supabase = await createClient();
+export async function createTaxInvoicePayment(
+  input: PaymentInput,
+): Promise<ActionResult> {
+  try {
+    const taxInvoiceId = cleanString(input.tax_invoice_id);
+    const paymentDate = cleanString(input.payment_date);
+    const amount = toNumber(input.amount);
+    const memo = cleanString(input.memo);
 
-  const tax_invoice_id = toStringValue(formData.get("tax_invoice_id"));
-  const payment_date = toStringValue(formData.get("payment_date"));
-  const amount = toNumber(formData.get("amount"));
-  const payment_method = toStringValue(formData.get("payment_method"));
-  const memo = toStringValue(formData.get("memo"));
+    if (!taxInvoiceId) {
+      return { ok: false, message: "세금계산서 정보가 없습니다." };
+    }
 
-  if (!tax_invoice_id) {
-    throw new Error("세금계산서 정보가 없습니다.");
+    if (!paymentDate) {
+      return { ok: false, message: "입금일을 선택해주세요." };
+    }
+
+    if (amount <= 0) {
+      return { ok: false, message: "입금액은 0원보다 커야 합니다." };
+    }
+
+    const supabase = await getSupabase();
+
+    const { error } = await supabase.from("tax_invoice_payments").insert({
+      tax_invoice_id: taxInvoiceId,
+      payment_date: paymentDate,
+      amount,
+      memo,
+    });
+
+    if (error) {
+      return {
+        ok: false,
+        message: `입금 등록에 실패했습니다. ${error.message}`,
+      };
+    }
+
+    revalidatePath(ACCOUNTING_PATH);
+
+    return { ok: true, message: "입금 내역이 등록되었습니다." };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error
+          ? error.message
+          : "입금 등록 중 오류가 발생했습니다.",
+    };
   }
-
-  if (amount <= 0) {
-    throw new Error("입금액은 0원보다 커야 합니다.");
-  }
-
-  const { error } = await supabase.from("tax_invoice_payments").insert({
-    tax_invoice_id,
-    payment_date: payment_date || new Date().toISOString().slice(0, 10),
-    amount,
-    payment_method: payment_method || null,
-    memo: memo || null,
-  });
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  revalidatePath("/accounting-network");
 }
 
-export async function deleteTaxInvoiceAction(formData: FormData) {
-  const supabase = await createClient();
+export async function updateTaxInvoicePayment(
+  input: PaymentUpdateInput,
+): Promise<ActionResult> {
+  try {
+    const id = cleanString(input.id);
+    const taxInvoiceId = cleanString(input.tax_invoice_id);
+    const paymentDate = cleanString(input.payment_date);
+    const amount = toNumber(input.amount);
+    const memo = cleanString(input.memo);
 
-  const id = toStringValue(formData.get("id"));
+    if (!id) {
+      return { ok: false, message: "수정할 입금 내역 정보가 없습니다." };
+    }
 
-  if (!id) {
-    throw new Error("삭제할 세금계산서 정보가 없습니다.");
+    if (!taxInvoiceId) {
+      return { ok: false, message: "세금계산서 정보가 없습니다." };
+    }
+
+    if (!paymentDate) {
+      return { ok: false, message: "입금일을 선택해주세요." };
+    }
+
+    if (amount <= 0) {
+      return { ok: false, message: "입금액은 0원보다 커야 합니다." };
+    }
+
+    const supabase = await getSupabase();
+
+    const { error } = await supabase
+      .from("tax_invoice_payments")
+      .update({
+        payment_date: paymentDate,
+        amount,
+        memo,
+      })
+      .eq("id", id)
+      .eq("tax_invoice_id", taxInvoiceId);
+
+    if (error) {
+      return {
+        ok: false,
+        message: `입금 내역 수정에 실패했습니다. ${error.message}`,
+      };
+    }
+
+    revalidatePath(ACCOUNTING_PATH);
+
+    return {
+      ok: true,
+      message: "입금 내역이 수정되었습니다. 미수금 상태도 자동 재계산됩니다.",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error
+          ? error.message
+          : "입금 내역 수정 중 오류가 발생했습니다.",
+    };
   }
+}
 
-  const { error } = await supabase.from("tax_invoices").delete().eq("id", id);
+export async function deleteTaxInvoicePayment(input: {
+  id: string;
+  tax_invoice_id: string;
+}): Promise<ActionResult> {
+  try {
+    const id = cleanString(input.id);
+    const taxInvoiceId = cleanString(input.tax_invoice_id);
 
-  if (error) {
-    throw new Error(error.message);
+    if (!id) {
+      return { ok: false, message: "삭제할 입금 내역 정보가 없습니다." };
+    }
+
+    if (!taxInvoiceId) {
+      return { ok: false, message: "세금계산서 정보가 없습니다." };
+    }
+
+    const supabase = await getSupabase();
+
+    const { error } = await supabase
+      .from("tax_invoice_payments")
+      .delete()
+      .eq("id", id)
+      .eq("tax_invoice_id", taxInvoiceId);
+
+    if (error) {
+      return {
+        ok: false,
+        message: `입금 내역 삭제에 실패했습니다. ${error.message}`,
+      };
+    }
+
+    revalidatePath(ACCOUNTING_PATH);
+
+    return {
+      ok: true,
+      message: "입금 내역이 삭제되었습니다. 미수금 상태도 자동 재계산됩니다.",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error
+          ? error.message
+          : "입금 내역 삭제 중 오류가 발생했습니다.",
+    };
   }
-
-  revalidatePath("/accounting-network");
 }

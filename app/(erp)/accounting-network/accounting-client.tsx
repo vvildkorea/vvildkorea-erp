@@ -1,1281 +1,1595 @@
 "use client";
 
-import { useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { useMemo, useState, useTransition } from "react";
 import {
-  createTaxInvoiceAction,
-  createTaxInvoicePaymentAction,
-  deleteTaxInvoiceAction,
+  createTaxInvoice,
+  createTaxInvoicePayment,
+  deleteTaxInvoice,
+  deleteTaxInvoicePayment,
+  updateTaxInvoice,
+  updateTaxInvoicePayment,
+  type ActionResult,
+  type PaymentUpdateInput,
+  type TaxInvoiceUpdateInput,
 } from "./actions";
 
-type AnyRow = Record<string, any>;
+type Row = Record<string, any>;
 
-type Props = {
-  currentYear: number;
-  defaultInvoiceNumber: string;
-  invoices: AnyRow[];
-  partners: AnyRow[];
-  invoiceOrderLinks: AnyRow[];
-  orders: AnyRow[];
-  orderItems: AnyRow[];
-  headquartersPrices: AnyRow[];
+type AccountingClientProps = {
+  partners: Row[];
+  orders: Row[];
+  orderItems: Row[];
+  productVariantPrices: Row[];
+  taxInvoices: Row[];
+  taxInvoiceOrders: Row[];
+  taxInvoicePayments: Row[];
+  taxInvoiceSummary: Row[];
 };
 
-function formatKrw(value: unknown) {
-  const numberValue = Number(value ?? 0);
+type TabKey = "tax-invoices" | "profit";
 
-  if (!Number.isFinite(numberValue)) {
-    return "₩0";
-  }
+type InvoiceForm = {
+  id?: string;
+  invoice_number: string;
+  issue_date: string;
+  partner_id: string;
+  order_ids: string[];
+  memo: string;
+  paid_full: boolean;
+};
 
-  return `₩${Math.round(numberValue).toLocaleString("ko-KR")}`;
+type PaymentForm = {
+  id?: string;
+  tax_invoice_id: string;
+  payment_date: string;
+  amount: string;
+  memo: string;
+};
+
+type InvoiceView = Row & {
+  id: string;
+  invoice_number: string;
+  issue_date: string;
+  partner_id: string;
+  memo: string;
+  partner?: Row;
+  linkedOrderIds: string[];
+  linkedOrders: Row[];
+  payments: Row[];
+  totalAmount: number;
+  paidAmount: number;
+  remainingAmount: number;
+  status: string;
+};
+
+type ProfitYearRow = {
+  year: string;
+  orderCount: number;
+  salesAmount: number;
+  costAmount: number;
+  profitAmount: number;
+  profitRate: number;
+};
+
+const emptyInvoiceForm: InvoiceForm = {
+  invoice_number: "",
+  issue_date: getToday(),
+  partner_id: "",
+  order_ids: [],
+  memo: "",
+  paid_full: false,
+};
+
+const emptyPaymentForm: PaymentForm = {
+  tax_invoice_id: "",
+  payment_date: getToday(),
+  amount: "",
+  memo: "",
+};
+
+function getToday() {
+  const now = new Date();
+  const koreaTime = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  return koreaTime.toISOString().slice(0, 10);
 }
 
 function toNumber(value: unknown) {
-  if (value === null || value === undefined) return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
 
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : 0;
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : 0;
   }
 
-  const text = String(value)
-    .replaceAll(",", "")
-    .replaceAll("₩", "")
-    .trim();
-
-  const numberValue = Number(text);
-  return Number.isFinite(numberValue) ? numberValue : 0;
+  return 0;
 }
 
-function getPartnerName(partner?: AnyRow) {
-  if (!partner) return "-";
+function formatKrw(value: unknown) {
+  return `${Math.round(toNumber(value)).toLocaleString("ko-KR")}원`;
+}
+
+function formatPercent(value: number) {
+  if (!Number.isFinite(value)) return "-";
+  return `${value.toFixed(1)}%`;
+}
+
+function formatDate(value: unknown) {
+  if (!value) return "-";
+
+  const text = String(value);
+  return text.length >= 10 ? text.slice(0, 10) : text;
+}
+
+function getId(row: Row) {
+  return String(row.id ?? "");
+}
+
+function getPartnerName(partner?: Row) {
+  if (!partner) return "거래처 없음";
 
   return (
     partner.name ??
     partner.partner_name ??
     partner.company_name ??
     partner.business_name ??
-    partner.store_name ??
-    partner.display_name ??
-    "-"
+    "거래처명 없음"
   );
 }
 
-function getOrderNumber(order?: AnyRow) {
-  if (!order) return "-";
+function getOrderNumber(order?: Row) {
+  if (!order) return "주문번호 없음";
 
   return (
     order.order_number ??
     order.order_no ??
-    order.number ??
     order.code ??
-    String(order.id ?? "").slice(0, 8)
+    order.order_code ??
+    order.id ??
+    "주문번호 없음"
   );
 }
 
-function getOrderDate(order?: AnyRow) {
+function getOrderDate(order?: Row) {
   if (!order) return "-";
 
-  const value =
-    order.order_date ?? order.created_at ?? order.date ?? order.updated_at ?? "";
-
-  if (!value) return "-";
-
-  return String(value).slice(0, 10);
-}
-
-function getOrderPartnerId(order?: AnyRow) {
-  return String(order?.partner_id ?? "");
-}
-
-function getOrderItemOrderId(item?: AnyRow) {
-  return String(item?.order_id ?? "");
-}
-
-function getOrderItemVariantId(item?: AnyRow) {
-  return String(item?.product_variant_id ?? item?.variant_id ?? "");
-}
-
-function getOrderItemQuantity(item?: AnyRow) {
-  return toNumber(item?.quantity ?? item?.qty ?? item?.count);
-}
-
-function getOrderItemSaleAmount(item?: AnyRow) {
-  const directAmount = toNumber(
-    item?.total_amount ??
-      item?.total_price ??
-      item?.amount ??
-      item?.subtotal ??
-      item?.line_total
+  return formatDate(
+    order.order_date ?? order.created_at ?? order.date ?? order.ordered_at,
   );
+}
 
-  if (directAmount > 0) {
-    return directAmount;
+function getOrderYear(order?: Row) {
+  const dateText = getOrderDate(order);
+  if (!dateText || dateText === "-") return "연도 없음";
+  return dateText.slice(0, 4);
+}
+
+function getRecordAmount(row: Row) {
+  const candidates = [
+    "total_amount",
+    "order_total",
+    "final_amount",
+    "sales_amount",
+    "amount",
+    "total_price",
+    "supply_amount",
+  ];
+
+  for (const key of candidates) {
+    const value = toNumber(row[key]);
+    if (value > 0) return value;
   }
 
-  const quantity = getOrderItemQuantity(item);
-  const unitPrice = toNumber(
-    item?.unit_price ??
-      item?.price ??
-      item?.sale_price ??
-      item?.selling_price ??
-      item?.product_price
-  );
-
-  return quantity * unitPrice;
+  return 0;
 }
 
-function isSampleOrder(order?: AnyRow) {
-  const orderType = String(order?.order_type ?? order?.type ?? "").toLowerCase();
-  const status = String(order?.status ?? "").toLowerCase();
-  const orderNumber = String(getOrderNumber(order)).toUpperCase();
-
-  return (
-    orderType.includes("sample") ||
-    status.includes("샘플") ||
-    status.includes("sample") ||
-    orderNumber.startsWith("SMP")
-  );
+function getItemQuantity(item: Row) {
+  return toNumber(item.quantity ?? item.qty ?? item.order_quantity);
 }
 
-function getOrderAmount(order: AnyRow, itemsByOrderId: Map<string, AnyRow[]>) {
-  const directAmount = toNumber(
-    order.total_amount ??
-      order.total_price ??
-      order.order_amount ??
-      order.amount ??
-      order.final_amount
-  );
+function getItemSalesPrice(item: Row) {
+  const candidates = [
+    "unit_price",
+    "sales_price",
+    "price",
+    "order_price",
+    "selling_price",
+  ];
 
-  if (directAmount > 0) {
-    return directAmount;
+  for (const key of candidates) {
+    const value = toNumber(item[key]);
+    if (value > 0) return value;
   }
 
-  const orderId = String(order.id ?? "");
-  const items = itemsByOrderId.get(orderId) ?? [];
-
-  return items.reduce((sum, item) => sum + getOrderItemSaleAmount(item), 0);
+  return 0;
 }
 
-function getPaymentStatus(invoice: AnyRow) {
-  const status = String(invoice.payment_status ?? "");
+function getItemCostPrice(item: Row, productVariantPrices: Row[]) {
+  const directCandidates = [
+    "product_cost",
+    "cost_price",
+    "landed_cost",
+    "arrival_cost",
+    "purchase_price",
+  ];
 
+  for (const key of directCandidates) {
+    const value = toNumber(item[key]);
+    if (value > 0) return value;
+  }
+
+  const variantId = String(
+    item.product_variant_id ?? item.variant_id ?? item.product_id ?? "",
+  );
+
+  if (!variantId) return 0;
+
+  const costRow = productVariantPrices.find((price) => {
+    const priceVariantId = String(
+      price.product_variant_id ?? price.variant_id ?? "",
+    );
+
+    return (
+      priceVariantId === variantId &&
+      String(price.partner_type ?? "") === "headquarters"
+    );
+  });
+
+  if (!costRow) return 0;
+
+  return toNumber(costRow.price ?? costRow.amount ?? costRow.cost);
+}
+
+function getStatusLabel(totalAmount: number, paidAmount: number) {
+  if (paidAmount <= 0) return "미입금";
+  if (paidAmount < totalAmount) return "부분입금";
+  return "완납";
+}
+
+function getStatusClass(status: string) {
+  if (status === "완납" || status === "paid") {
+    return "bg-rose-50 text-rose-700 ring-1 ring-rose-200";
+  }
+
+  if (status === "부분입금" || status === "partial") {
+    return "bg-amber-50 text-amber-700 ring-1 ring-amber-200";
+  }
+
+  return "bg-slate-50 text-slate-700 ring-1 ring-slate-200";
+}
+
+function getStatusText(status: string) {
   if (status === "paid") return "paid";
   if (status === "partial") return "partial";
   if (status === "unpaid") return "unpaid";
-
-  const totalAmount = toNumber(invoice.total_amount);
-  const paidAmount = toNumber(invoice.paid_amount);
-
-  if (paidAmount <= 0) return "unpaid";
-  if (paidAmount >= totalAmount) return "paid";
-  return "partial";
+  return status;
 }
 
-function getStatusLabel(status: string) {
-  if (status === "paid") return "완납";
-  if (status === "partial") return "부분입금";
-  return "미입금";
-}
+function sortByDateDesc(rows: Row[], keys: string[]) {
+  return [...rows].sort((a, b) => {
+    const aValue = keys.map((key) => a[key]).find(Boolean);
+    const bValue = keys.map((key) => b[key]).find(Boolean);
 
-function getStatusClassName(status: string) {
-  if (status === "paid") {
-    return "bg-emerald-50 text-emerald-700";
-  }
-
-  if (status === "partial") {
-    return "bg-amber-50 text-amber-700";
-  }
-
-  return "bg-rose-50 text-rose-700";
-}
-
-function getInvoiceIssueYear(invoice: AnyRow) {
-  return String(invoice.issue_date ?? "").slice(0, 4);
+    return String(bValue ?? "").localeCompare(String(aValue ?? ""));
+  });
 }
 
 export default function AccountingClient({
-  currentYear,
-  defaultInvoiceNumber,
-  invoices,
   partners,
-  invoiceOrderLinks,
   orders,
   orderItems,
-  headquartersPrices,
-}: Props) {
-  const [activeTab, setActiveTab] = useState<"tax-invoice" | "profit">(
-    "tax-invoice"
-  );
-  const [partnerFilter, setPartnerFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [paymentInvoice, setPaymentInvoice] = useState<AnyRow | null>(null);
+  productVariantPrices,
+  taxInvoices,
+  taxInvoiceOrders,
+  taxInvoicePayments,
+  taxInvoiceSummary,
+}: AccountingClientProps) {
+  const [activeTab, setActiveTab] = useState<TabKey>("tax-invoices");
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState("");
+  const [isCreateInvoiceOpen, setIsCreateInvoiceOpen] = useState(false);
+  const [invoiceForm, setInvoiceForm] =
+    useState<InvoiceForm>(emptyInvoiceForm);
+  const [editInvoiceForm, setEditInvoiceForm] =
+    useState<InvoiceForm | null>(null);
+  const [paymentForm, setPaymentForm] =
+    useState<PaymentForm>(emptyPaymentForm);
+  const [editPaymentForm, setEditPaymentForm] =
+    useState<PaymentForm | null>(null);
+  const [message, setMessage] = useState<ActionResult | null>(null);
+  const [isPending, startTransition] = useTransition();
 
-  const partnerById = useMemo(() => {
-    const map = new Map<string, AnyRow>();
-
-    partners.forEach((partner) => {
-      map.set(String(partner.id), partner);
-    });
-
-    return map;
+  const partnerMap = useMemo(() => {
+    return new Map(partners.map((partner) => [getId(partner), partner]));
   }, [partners]);
 
-  const sortedPartners = useMemo(() => {
-    return [...partners].sort((a, b) =>
-      String(getPartnerName(a)).localeCompare(String(getPartnerName(b)), "ko")
-    );
-  }, [partners]);
-
-  const orderById = useMemo(() => {
-    const map = new Map<string, AnyRow>();
-
-    orders.forEach((order) => {
-      map.set(String(order.id), order);
-    });
-
-    return map;
+  const orderMap = useMemo(() => {
+    return new Map(orders.map((order) => [getId(order), order]));
   }, [orders]);
 
-  const itemsByOrderId = useMemo(() => {
-    const map = new Map<string, AnyRow[]>();
+  const invoices = useMemo<InvoiceView[]>(() => {
+    return sortByDateDesc(taxInvoices, ["issue_date", "created_at"]).map(
+      (invoice): InvoiceView => {
+        const invoiceId = getId(invoice);
 
-    orderItems.forEach((item) => {
-      const orderId = getOrderItemOrderId(item);
-      if (!orderId) return;
+        const linkedOrderIds = taxInvoiceOrders
+          .filter((link) => String(link.tax_invoice_id) === invoiceId)
+          .map((link) => String(link.order_id));
 
-      const prev = map.get(orderId) ?? [];
-      prev.push(item);
-      map.set(orderId, prev);
-    });
+        const linkedOrders = linkedOrderIds
+          .map((orderId) => orderMap.get(orderId))
+          .filter(Boolean) as Row[];
 
-    return map;
-  }, [orderItems]);
+        const payments = sortByDateDesc(
+          taxInvoicePayments.filter(
+            (payment) => String(payment.tax_invoice_id) === invoiceId,
+          ),
+          ["payment_date", "created_at"],
+        );
 
-  const orderAmountById = useMemo(() => {
-    const map = new Map<string, number>();
+        const summary = taxInvoiceSummary.find((row) => {
+          return (
+            String(row.tax_invoice_id ?? row.invoice_id ?? row.id ?? "") ===
+            invoiceId
+          );
+        });
 
-    orders.forEach((order) => {
-      map.set(String(order.id), getOrderAmount(order, itemsByOrderId));
-    });
+        const calculatedTotal = linkedOrders.reduce((sum, order) => {
+          return sum + getRecordAmount(order);
+        }, 0);
 
-    return map;
-  }, [orders, itemsByOrderId]);
+        const totalAmount =
+          toNumber(summary?.total_amount) ||
+          toNumber(invoice.total_amount) ||
+          calculatedTotal;
 
-  const invoiceOrderLinksByInvoiceId = useMemo(() => {
-    const map = new Map<string, AnyRow[]>();
+        const paidAmount =
+          toNumber(summary?.paid_amount) ||
+          payments.reduce((sum, payment) => {
+            return sum + toNumber(payment.amount);
+          }, 0);
 
-    invoiceOrderLinks.forEach((link) => {
-      const invoiceId = String(link.tax_invoice_id ?? "");
-      if (!invoiceId) return;
+        const remainingAmount =
+          summary?.remaining_amount !== undefined
+            ? toNumber(summary.remaining_amount)
+            : Math.max(totalAmount - paidAmount, 0);
 
-      const prev = map.get(invoiceId) ?? [];
-      prev.push(link);
-      map.set(invoiceId, prev);
-    });
+        const status = String(
+          summary?.payment_status ??
+            summary?.status ??
+            getStatusLabel(totalAmount, paidAmount),
+        );
 
-    return map;
-  }, [invoiceOrderLinks]);
-
-  const headquartersPriceByVariantId = useMemo(() => {
-    const map = new Map<string, number>();
-
-    headquartersPrices.forEach((priceRow) => {
-      const variantId = String(priceRow.product_variant_id ?? "");
-      if (!variantId) return;
-
-      map.set(variantId, toNumber(priceRow.price));
-    });
-
-    return map;
-  }, [headquartersPrices]);
-
-  const filteredInvoices = useMemo(() => {
-    return invoices.filter((invoice) => {
-      const partnerMatched =
-        partnerFilter === "all" ||
-        String(invoice.partner_id ?? "") === partnerFilter;
-
-      const invoiceStatus = getPaymentStatus(invoice);
-
-      const statusMatched =
-        statusFilter === "all" || invoiceStatus === statusFilter;
-
-      return partnerMatched && statusMatched;
-    });
-  }, [invoices, partnerFilter, statusFilter]);
-
-  const yearInvoices = useMemo(() => {
-    return filteredInvoices.filter(
-      (invoice) => getInvoiceIssueYear(invoice) === String(currentYear)
+        return {
+          ...invoice,
+          id: invoiceId,
+          invoice_number: String(invoice.invoice_number ?? ""),
+          issue_date: formatDate(invoice.issue_date),
+          partner_id: String(invoice.partner_id ?? ""),
+          memo: String(invoice.memo ?? ""),
+          partner: partnerMap.get(String(invoice.partner_id)),
+          linkedOrderIds,
+          linkedOrders,
+          payments,
+          totalAmount,
+          paidAmount,
+          remainingAmount,
+          status,
+        };
+      },
     );
-  }, [filteredInvoices, currentYear]);
+  }, [
+    taxInvoices,
+    taxInvoiceOrders,
+    taxInvoicePayments,
+    taxInvoiceSummary,
+    orderMap,
+    partnerMap,
+  ]);
 
-  const filteredOrders = useMemo(() => {
-    return orders.filter((order) => {
-      const partnerMatched =
-        partnerFilter === "all" || getOrderPartnerId(order) === partnerFilter;
+  const selectedInvoice = useMemo<InvoiceView | null>(() => {
+    return invoices.find((invoice) => invoice.id === selectedInvoiceId) ?? null;
+  }, [invoices, selectedInvoiceId]);
 
-      const orderYear = getOrderDate(order).slice(0, 4);
+  const accountingSummary = useMemo(() => {
+    const orderCount = orders.length;
 
-      return partnerMatched && orderYear === String(currentYear);
-    });
-  }, [orders, partnerFilter, currentYear]);
-
-  const regularOrders = useMemo(() => {
-    return filteredOrders.filter((order) => !isSampleOrder(order));
-  }, [filteredOrders]);
-
-  const totalSalesAmount = useMemo(() => {
-    return regularOrders.reduce((sum, order) => {
-      return sum + (orderAmountById.get(String(order.id)) ?? 0);
+    const totalSalesAmount = orders.reduce((sum, order) => {
+      return sum + getRecordAmount(order);
     }, 0);
-  }, [regularOrders, orderAmountById]);
 
-  const invoiceTotalAmount = useMemo(() => {
-    return yearInvoices.reduce(
-      (sum, invoice) => sum + toNumber(invoice.total_amount),
-      0
-    );
-  }, [yearInvoices]);
+    const invoiceIssuedAmount = invoices.reduce((sum, invoice) => {
+      return sum + invoice.totalAmount;
+    }, 0);
 
-  const paidTotalAmount = useMemo(() => {
-    return yearInvoices.reduce(
-      (sum, invoice) => sum + toNumber(invoice.paid_amount),
-      0
-    );
-  }, [yearInvoices]);
+    const paidAmount = invoices.reduce((sum, invoice) => {
+      return sum + invoice.paidAmount;
+    }, 0);
 
-  const unpaidTotalAmount = useMemo(() => {
-    return yearInvoices.reduce(
-      (sum, invoice) => sum + toNumber(invoice.unpaid_amount),
-      0
-    );
-  }, [yearInvoices]);
+    const unpaidAmount = invoices.reduce((sum, invoice) => {
+      return sum + invoice.remainingAmount;
+    }, 0);
 
-  const profitRows = useMemo(() => {
-    return filteredOrders.map((order) => {
-      const orderId = String(order.id);
-      const items = itemsByOrderId.get(orderId) ?? [];
+    return {
+      orderCount,
+      totalSalesAmount,
+      invoiceIssuedAmount,
+      paidAmount,
+      unpaidAmount,
+    };
+  }, [orders, invoices]);
 
-      const salesAmount = isSampleOrder(order)
-        ? 0
-        : orderAmountById.get(orderId) ?? 0;
+  const orderProfitRows = useMemo(() => {
+    return orders.map((order) => {
+      const orderId = getId(order);
 
-      const costAmount = items.reduce((sum, item) => {
-        const variantId = getOrderItemVariantId(item);
-        const quantity = getOrderItemQuantity(item);
-        const costPrice = headquartersPriceByVariantId.get(variantId) ?? 0;
+      const items = orderItems.filter((item) => {
+        return String(item.order_id ?? item.orderId ?? "") === orderId;
+      });
 
-        return sum + quantity * costPrice;
+      const itemSalesAmount = items.reduce((sum, item) => {
+        const quantity = getItemQuantity(item);
+        const salesPrice = getItemSalesPrice(item);
+
+        const directTotal = toNumber(
+          item.total_amount ?? item.total_price ?? item.amount,
+        );
+
+        return sum + (directTotal > 0 ? directTotal : quantity * salesPrice);
       }, 0);
+
+      const itemCostAmount = items.reduce((sum, item) => {
+        const quantity = getItemQuantity(item);
+        const costPrice = getItemCostPrice(item, productVariantPrices);
+
+        const directTotal = toNumber(
+          item.cost_total ?? item.product_cost_total ?? item.purchase_total,
+        );
+
+        return sum + (directTotal > 0 ? directTotal : quantity * costPrice);
+      }, 0);
+
+      const salesAmount = getRecordAmount(order) || itemSalesAmount;
+
+      const costAmount =
+        toNumber(
+          order.product_cost_total ??
+            order.cost_total ??
+            order.purchase_total ??
+            order.total_cost,
+        ) || itemCostAmount;
 
       const profitAmount = salesAmount - costAmount;
       const profitRate =
-        salesAmount > 0
-          ? Math.round((profitAmount / salesAmount) * 1000) / 10
-          : 0;
+        salesAmount > 0 ? (profitAmount / salesAmount) * 100 : 0;
 
       return {
+        id: orderId,
         order,
+        year: getOrderYear(order),
         salesAmount,
         costAmount,
         profitAmount,
         profitRate,
-        isSample: isSampleOrder(order),
       };
     });
-  }, [
-    filteredOrders,
-    itemsByOrderId,
-    orderAmountById,
-    headquartersPriceByVariantId,
-  ]);
+  }, [orders, orderItems, productVariantPrices]);
 
-  const totalCostAmount = useMemo(() => {
-    return profitRows
-      .filter((row) => !row.isSample)
-      .reduce((sum, row) => sum + row.costAmount, 0);
-  }, [profitRows]);
+  const yearlyProfitRows = useMemo<ProfitYearRow[]>(() => {
+    const map = new Map<string, ProfitYearRow>();
 
-  const sampleCostAmount = useMemo(() => {
-    return profitRows
-      .filter((row) => row.isSample)
-      .reduce((sum, row) => sum + row.costAmount, 0);
-  }, [profitRows]);
+    for (const row of orderProfitRows) {
+      const prev =
+        map.get(row.year) ??
+        {
+          year: row.year,
+          orderCount: 0,
+          salesAmount: 0,
+          costAmount: 0,
+          profitAmount: 0,
+          profitRate: 0,
+        };
 
-  const totalProfitAmount = totalSalesAmount - totalCostAmount;
+      prev.orderCount += 1;
+      prev.salesAmount += row.salesAmount;
+      prev.costAmount += row.costAmount;
+      prev.profitAmount += row.profitAmount;
+      prev.profitRate =
+        prev.salesAmount > 0 ? (prev.profitAmount / prev.salesAmount) * 100 : 0;
 
-  const totalProfitRate =
-    totalSalesAmount > 0
-      ? Math.round((totalProfitAmount / totalSalesAmount) * 1000) / 10
-      : 0;
+      map.set(row.year, prev);
+    }
+
+    return Array.from(map.values()).sort((a, b) =>
+      String(b.year).localeCompare(String(a.year)),
+    );
+  }, [orderProfitRows]);
+
+  const invoiceCreatePreviewTotal = useMemo(() => {
+    return invoiceForm.order_ids.reduce((sum, orderId) => {
+      const order = orderMap.get(orderId);
+      return sum + (order ? getRecordAmount(order) : 0);
+    }, 0);
+  }, [invoiceForm.order_ids, orderMap]);
+
+  const invoiceEditPreviewTotal = useMemo(() => {
+    if (!editInvoiceForm) return 0;
+
+    return editInvoiceForm.order_ids.reduce((sum, orderId) => {
+      const order = orderMap.get(orderId);
+      return sum + (order ? getRecordAmount(order) : 0);
+    }, 0);
+  }, [editInvoiceForm, orderMap]);
+
+  function runAction(action: () => Promise<ActionResult>, onSuccess?: () => void) {
+    setMessage(null);
+
+    startTransition(() => {
+      void (async () => {
+        const result = await action();
+        setMessage(result);
+
+        if (result.ok) {
+          onSuccess?.();
+        }
+      })();
+    });
+  }
+
+  function toggleOrderInCreateForm(orderId: string) {
+    setInvoiceForm((prev) => {
+      const exists = prev.order_ids.includes(orderId);
+
+      return {
+        ...prev,
+        order_ids: exists
+          ? prev.order_ids.filter((id) => id !== orderId)
+          : [...prev.order_ids, orderId],
+      };
+    });
+  }
+
+  function toggleOrderInEditForm(orderId: string) {
+    setEditInvoiceForm((prev) => {
+      if (!prev) return prev;
+
+      const exists = prev.order_ids.includes(orderId);
+
+      return {
+        ...prev,
+        order_ids: exists
+          ? prev.order_ids.filter((id) => id !== orderId)
+          : [...prev.order_ids, orderId],
+      };
+    });
+  }
+
+  function handleCreateInvoice() {
+    runAction(
+      () =>
+        createTaxInvoice({
+          invoice_number: invoiceForm.invoice_number,
+          issue_date: invoiceForm.issue_date,
+          partner_id: invoiceForm.partner_id,
+          order_ids: invoiceForm.order_ids,
+          memo: invoiceForm.memo,
+          paid_full: invoiceForm.paid_full,
+        }),
+      () => {
+        setInvoiceForm(emptyInvoiceForm);
+        setIsCreateInvoiceOpen(false);
+      },
+    );
+  }
+
+  function handleOpenEditInvoice(invoice: InvoiceView) {
+    setEditInvoiceForm({
+      id: invoice.id,
+      invoice_number: invoice.invoice_number,
+      issue_date: invoice.issue_date,
+      partner_id: invoice.partner_id,
+      order_ids: invoice.linkedOrderIds,
+      memo: invoice.memo,
+      paid_full: false,
+    });
+  }
+
+  function handleUpdateInvoice() {
+    if (!editInvoiceForm?.id) return;
+
+    const payload: TaxInvoiceUpdateInput = {
+      id: editInvoiceForm.id,
+      invoice_number: editInvoiceForm.invoice_number,
+      issue_date: editInvoiceForm.issue_date,
+      partner_id: editInvoiceForm.partner_id,
+      order_ids: editInvoiceForm.order_ids,
+      memo: editInvoiceForm.memo,
+      paid_full: false,
+    };
+
+    runAction(() => updateTaxInvoice(payload), () => {
+      setEditInvoiceForm(null);
+    });
+  }
+
+  function handleDeleteInvoice(invoiceId: string) {
+    const ok = window.confirm(
+      "세금계산서를 삭제할까요?\n연결 주문과 입금 내역도 함께 삭제됩니다.",
+    );
+
+    if (!ok) return;
+
+    runAction(() => deleteTaxInvoice(invoiceId), () => {
+      if (selectedInvoiceId === invoiceId) {
+        setSelectedInvoiceId("");
+      }
+    });
+  }
+
+  function handleCreatePayment() {
+    if (!selectedInvoice) return;
+
+    runAction(
+      () =>
+        createTaxInvoicePayment({
+          tax_invoice_id: selectedInvoice.id,
+          payment_date: paymentForm.payment_date,
+          amount: toNumber(paymentForm.amount),
+          memo: paymentForm.memo,
+        }),
+      () => {
+        setPaymentForm({
+          ...emptyPaymentForm,
+          tax_invoice_id: selectedInvoice.id,
+        });
+      },
+    );
+  }
+
+  function handleOpenEditPayment(payment: Row) {
+    setEditPaymentForm({
+      id: String(payment.id ?? ""),
+      tax_invoice_id: String(payment.tax_invoice_id ?? ""),
+      payment_date: formatDate(payment.payment_date),
+      amount: String(toNumber(payment.amount)),
+      memo: String(payment.memo ?? ""),
+    });
+  }
+
+  function handleUpdatePayment() {
+    if (!editPaymentForm?.id) return;
+
+    const payload: PaymentUpdateInput = {
+      id: editPaymentForm.id,
+      tax_invoice_id: editPaymentForm.tax_invoice_id,
+      payment_date: editPaymentForm.payment_date,
+      amount: toNumber(editPaymentForm.amount),
+      memo: editPaymentForm.memo,
+    };
+
+    runAction(() => updateTaxInvoicePayment(payload), () => {
+      setEditPaymentForm(null);
+    });
+  }
+
+  function handleDeletePayment(payment: Row) {
+    const ok = window.confirm(
+      "입금 내역을 삭제할까요?\n삭제 후 미수금 상태가 자동 재계산됩니다.",
+    );
+
+    if (!ok) return;
+
+    runAction(() =>
+      deleteTaxInvoicePayment({
+        id: String(payment.id ?? ""),
+        tax_invoice_id: String(payment.tax_invoice_id ?? ""),
+      }),
+    );
+  }
 
   return (
-    <div className="space-y-8 text-slate-900">
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+    <div className="space-y-6 p-4 md:p-6">
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            회계 / 유통망 관리
-          </h1>
+          <h1 className="text-2xl font-bold text-gray-900">회계/유통망</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            세금계산서, 입금 내역, 주문별 손익을 관리합니다.
+          </p>
         </div>
 
-        <select
-          value={partnerFilter}
-          onChange={(event) => setPartnerFilter(event.target.value)}
-          className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm shadow-sm outline-none md:w-64"
-        >
-          <option value="all">모든 거래처</option>
-          {sortedPartners.map((partner) => (
-            <option key={String(partner.id)} value={String(partner.id)}>
-              {getPartnerName(partner)}
-            </option>
-          ))}
-        </select>
+        <div className="flex rounded-xl bg-gray-100 p-1">
+          <button
+            type="button"
+            onClick={() => setActiveTab("tax-invoices")}
+            className={`rounded-lg px-4 py-2 text-sm font-medium ${
+              activeTab === "tax-invoices"
+                ? "bg-white text-gray-900 shadow-sm ring-1 ring-blue-500"
+                : "text-gray-500"
+            }`}
+          >
+            세금계산서
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("profit")}
+            className={`rounded-lg px-4 py-2 text-sm font-medium ${
+              activeTab === "profit"
+                ? "bg-white text-gray-900 shadow-sm ring-1 ring-blue-500"
+                : "text-gray-500"
+            }`}
+          >
+            손익 계산
+          </button>
+        </div>
       </div>
 
-      <div className="inline-flex rounded-2xl bg-white/60 p-1 shadow-sm">
-        <button
-          type="button"
-          onClick={() => setActiveTab("tax-invoice")}
-          className={`rounded-xl px-5 py-2 text-sm font-semibold transition ${
-            activeTab === "tax-invoice"
-              ? "bg-white text-slate-900 shadow"
-              : "text-slate-500"
+      {message && (
+        <div
+          className={`rounded-xl px-4 py-3 text-sm ${
+            message.ok
+              ? "bg-emerald-50 text-emerald-700"
+              : "bg-rose-50 text-rose-700"
           }`}
         >
-          세금계산서
-        </button>
+          {message.message}
+        </div>
+      )}
 
-        <button
-          type="button"
-          onClick={() => setActiveTab("profit")}
-          className={`rounded-xl px-5 py-2 text-sm font-semibold transition ${
-            activeTab === "profit"
-              ? "bg-white text-slate-900 shadow"
-              : "text-slate-500"
-          }`}
-        >
-          손익 계산
-        </button>
-      </div>
+      {activeTab === "tax-invoices" && (
+        <div className="space-y-6">
+          <div className="grid gap-3 md:grid-cols-5">
+            <SummaryCard
+              title="주문건수"
+              value={`${accountingSummary.orderCount.toLocaleString("ko-KR")}건`}
+            />
+            <SummaryCard
+              title="누적매출금액"
+              value={formatKrw(accountingSummary.totalSalesAmount)}
+            />
+            <SummaryCard
+              title="세금계산서 발행금액"
+              value={formatKrw(accountingSummary.invoiceIssuedAmount)}
+            />
+            <SummaryCard
+              title="입금합계금액"
+              value={formatKrw(accountingSummary.paidAmount)}
+            />
+            <SummaryCard
+              title="미수금"
+              value={formatKrw(accountingSummary.unpaidAmount)}
+            />
+          </div>
 
-      {activeTab === "tax-invoice" ? (
-        <>
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-sm font-semibold text-slate-500">
-                입금 상태:
-              </span>
+          <section className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+            <div className="flex flex-col gap-3 border-b border-gray-200 p-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">
+                  세금계산서 목록
+                </h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  총 {invoices.length}건
+                </p>
+              </div>
 
-              <select
-                value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value)}
-                className="h-12 w-48 rounded-2xl border border-slate-200 bg-white px-4 text-sm shadow-sm outline-none"
+              <button
+                type="button"
+                onClick={() => {
+                  setInvoiceForm(emptyInvoiceForm);
+                  setIsCreateInvoiceOpen(true);
+                }}
+                className="rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white"
               >
-                <option value="all">전체</option>
-                <option value="paid">완납</option>
-                <option value="partial">부분입금</option>
-                <option value="unpaid">미입금</option>
-              </select>
+                세금계산서 등록
+              </button>
             </div>
 
-            <CreateTaxInvoiceModal
-              currentYear={currentYear}
-              defaultInvoiceNumber={defaultInvoiceNumber}
-              partners={sortedPartners}
-              orders={regularOrders}
-              orderAmountById={orderAmountById}
-            />
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-5">
-            <SummaryCard label="건수" value={`${yearInvoices.length}건`} />
-            <SummaryCard
-              label={`${currentYear}년 누적 매출`}
-              value={formatKrw(totalSalesAmount)}
-              valueClassName="text-blue-600"
-            />
-            <SummaryCard
-              label="세금계산서 발행 금액"
-              value={formatKrw(invoiceTotalAmount)}
-            />
-            <SummaryCard
-              label="입금 합계"
-              value={formatKrw(paidTotalAmount)}
-              valueClassName="text-emerald-700"
-            />
-            <SummaryCard
-              label="미수금"
-              value={formatKrw(unpaidTotalAmount)}
-              valueClassName="text-orange-700"
-            />
-          </div>
-
-          <div className="overflow-hidden rounded-3xl bg-white p-6 shadow-sm">
             <div className="overflow-x-auto">
-              <table className="min-w-[1100px] w-full border-separate border-spacing-0 text-sm">
-                <thead>
-                  <tr className="bg-stone-50 text-left text-slate-500">
-                    <TableHead className="rounded-l-2xl">계산서 번호</TableHead>
-                    <TableHead>거래처</TableHead>
-                    <TableHead>발행일</TableHead>
-                    <TableHead>연결 주문</TableHead>
-                    <TableHead className="text-right">합계금액</TableHead>
-                    <TableHead className="text-right">입금액</TableHead>
-                    <TableHead className="text-right">미수금</TableHead>
-                    <TableHead>상태</TableHead>
-                    <TableHead className="rounded-r-2xl text-right">
-                      액션
-                    </TableHead>
+              <table className="w-full min-w-[900px] text-sm">
+                <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  <tr>
+                    <th className="px-4 py-3">발행일</th>
+                    <th className="px-4 py-3">계산서 번호</th>
+                    <th className="px-4 py-3">거래처</th>
+                    <th className="px-4 py-3 text-right">합계금액</th>
+                    <th className="px-4 py-3 text-right">입금액</th>
+                    <th className="px-4 py-3 text-right">미수금</th>
+                    <th className="px-4 py-3">상태</th>
+                    <th className="px-4 py-3 text-right">관리</th>
                   </tr>
                 </thead>
-
-                <tbody>
-                  {filteredInvoices.length === 0 ? (
+                <tbody className="divide-y divide-gray-100">
+                  {invoices.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={9}
-                        className="py-12 text-center text-slate-400"
+                        colSpan={8}
+                        className="px-4 py-12 text-center text-gray-500"
                       >
                         등록된 세금계산서가 없습니다.
                       </td>
                     </tr>
                   ) : (
-                    filteredInvoices.map((invoice) => {
-                      const partner = partnerById.get(
-                        String(invoice.partner_id ?? "")
-                      );
-
-                      const links =
-                        invoiceOrderLinksByInvoiceId.get(String(invoice.id)) ??
-                        [];
-
-                      const linkedOrders = links
-                        .map((link) =>
-                          orderById.get(String(link.order_id ?? ""))
-                        )
-                        .filter(Boolean);
-
-                      const status = getPaymentStatus(invoice);
-
-                      return (
-                        <tr
-                          key={String(invoice.id)}
-                          className="border-b border-slate-100"
-                        >
-                          <TableCell className="font-semibold">
-                            {invoice.invoice_number}
-                          </TableCell>
-                          <TableCell>{getPartnerName(partner)}</TableCell>
-                          <TableCell className="text-slate-500">
-                            {String(invoice.issue_date ?? "").slice(0, 10)}
-                          </TableCell>
-                          <TableCell>
-                            {linkedOrders.length > 0 ? (
-                              <div className="flex flex-wrap gap-1">
-                                {linkedOrders.map((order) => (
-                                  <span
-                                    key={String(order?.id)}
-                                    className="font-semibold text-red-600"
-                                  >
-                                    #{getOrderNumber(order)}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : (
-                              <span className="text-slate-400">-</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right font-bold">
-                            {formatKrw(invoice.total_amount)}
-                          </TableCell>
-                          <TableCell className="text-right font-bold text-emerald-700">
-                            {formatKrw(invoice.paid_amount)}
-                          </TableCell>
-                          <TableCell className="text-right font-bold text-orange-700">
-                            {formatKrw(invoice.unpaid_amount)}
-                          </TableCell>
-                          <TableCell>
-                            <span
-                              className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${getStatusClassName(
-                                status
-                              )}`}
+                    invoices.map((invoice) => (
+                      <tr key={invoice.id} className="bg-white">
+                        <td className="px-4 py-3">
+                          {formatDate(invoice.issue_date)}
+                        </td>
+                        <td className="px-4 py-3 font-medium text-gray-900">
+                          {invoice.invoice_number}
+                        </td>
+                        <td className="px-4 py-3">
+                          {getPartnerName(invoice.partner)}
+                        </td>
+                        <td className="px-4 py-3 text-right font-medium">
+                          {formatKrw(invoice.totalAmount)}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {formatKrw(invoice.paidAmount)}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {formatKrw(invoice.remainingAmount)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getStatusClass(
+                              invoice.status,
+                            )}`}
+                          >
+                            {getStatusText(invoice.status)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedInvoiceId(invoice.id);
+                                setPaymentForm({
+                                  ...emptyPaymentForm,
+                                  tax_invoice_id: invoice.id,
+                                });
+                              }}
+                              className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700"
                             >
-                              {getStatusLabel(status)}
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center justify-end gap-2">
-                              <button
-                                type="button"
-                                onClick={() => setPaymentInvoice(invoice)}
-                                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold shadow-sm hover:bg-slate-50"
-                              >
-                                입금
-                              </button>
-
-                              <button
-                                type="button"
-                                disabled
-                                title="수정 기능은 다음 단계에서 연결합니다."
-                                className="rounded-xl px-3 py-2 text-xs font-bold text-slate-400"
-                              >
-                                수정
-                              </button>
-
-                              <form
-                                action={deleteTaxInvoiceAction}
-                                onSubmit={(event) => {
-                                  if (
-                                    !window.confirm(
-                                      "이 세금계산서를 삭제할까요? 연결된 입금 내역도 함께 삭제됩니다."
-                                    )
-                                  ) {
-                                    event.preventDefault();
-                                  }
-                                }}
-                              >
-                                <input
-                                  type="hidden"
-                                  name="id"
-                                  value={String(invoice.id)}
-                                />
-                                <button
-                                  type="submit"
-                                  className="rounded-xl px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50"
-                                >
-                                  삭제
-                                </button>
-                              </form>
-                            </div>
-                          </TableCell>
-                        </tr>
-                      );
-                    })
+                              상세
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditInvoice(invoice)}
+                              className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700"
+                            >
+                              수정
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteInvoice(invoice.id)}
+                              className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-600"
+                            >
+                              삭제
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
                   )}
                 </tbody>
               </table>
             </div>
-          </div>
+          </section>
+        </div>
+      )}
 
-          <PaymentModal
-            invoice={paymentInvoice}
-            onClose={() => setPaymentInvoice(null)}
-          />
-        </>
-      ) : (
-        <>
-          <div className="grid gap-4 md:grid-cols-5">
-            <SummaryCard
-              label={`${currentYear}년 매출`}
-              value={formatKrw(totalSalesAmount)}
-              valueClassName="text-blue-600"
-            />
-            <SummaryCard
-              label="상품원가"
-              value={formatKrw(totalCostAmount)}
-            />
-            <SummaryCard
-              label="샘플 출고 원가"
-              value={formatKrw(sampleCostAmount)}
-              valueClassName="text-orange-700"
-            />
-            <SummaryCard
-              label="매출이익"
-              value={formatKrw(totalProfitAmount)}
-              valueClassName={
-                totalProfitAmount >= 0 ? "text-emerald-700" : "text-red-600"
-              }
-            />
-            <SummaryCard label="이익률" value={`${totalProfitRate}%`} />
-          </div>
-
-          <div className="overflow-hidden rounded-3xl bg-white p-6 shadow-sm">
-            <div className="mb-4">
-              <h2 className="text-lg font-bold">주문별 손익</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                도착원가 기준으로 상품원가를 계산합니다.
+      {activeTab === "profit" && (
+        <section className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between border-b border-gray-200 p-4">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">
+                연도별 손익 계산
+              </h2>
+              <p className="mt-1 text-sm text-gray-500">
+                주문 데이터를 연도별로 합산하여 매출, 상품원가, 이익률을 계산합니다.
               </p>
             </div>
+            <span className="text-sm text-gray-500">
+              총 {yearlyProfitRows.length}개 연도
+            </span>
+          </div>
 
-            <div className="overflow-x-auto">
-              <table className="min-w-[1000px] w-full border-separate border-spacing-0 text-sm">
-                <thead>
-                  <tr className="bg-stone-50 text-left text-slate-500">
-                    <TableHead className="rounded-l-2xl">주문번호</TableHead>
-                    <TableHead>거래처</TableHead>
-                    <TableHead>주문일</TableHead>
-                    <TableHead>구분</TableHead>
-                    <TableHead className="text-right">매출</TableHead>
-                    <TableHead className="text-right">상품원가</TableHead>
-                    <TableHead className="text-right">매출이익</TableHead>
-                    <TableHead className="rounded-r-2xl text-right">
-                      이익률
-                    </TableHead>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] text-sm">
+              <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                <tr>
+                  <th className="px-4 py-3">연도</th>
+                  <th className="px-4 py-3 text-right">주문건수</th>
+                  <th className="px-4 py-3 text-right">매출</th>
+                  <th className="px-4 py-3 text-right">상품원가</th>
+                  <th className="px-4 py-3 text-right">매출이익</th>
+                  <th className="px-4 py-3 text-right">이익률</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {yearlyProfitRows.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="px-4 py-10 text-center text-gray-500"
+                    >
+                      손익 계산할 주문이 없습니다.
+                    </td>
                   </tr>
-                </thead>
-
-                <tbody>
-                  {profitRows.length === 0 ? (
-                    <tr>
+                ) : (
+                  yearlyProfitRows.map((row) => (
+                    <tr key={row.year}>
+                      <td className="px-4 py-3 font-semibold text-gray-900">
+                        {row.year}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {row.orderCount.toLocaleString("ko-KR")}건
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {formatKrw(row.salesAmount)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {formatKrw(row.costAmount)}
+                      </td>
                       <td
-                        colSpan={8}
-                        className="py-12 text-center text-slate-400"
+                        className={`px-4 py-3 text-right font-semibold ${
+                          row.profitAmount >= 0
+                            ? "text-gray-900"
+                            : "text-rose-600"
+                        }`}
                       >
-                        손익 계산할 주문이 없습니다.
+                        {formatKrw(row.profitAmount)}
+                      </td>
+                      <td
+                        className={`px-4 py-3 text-right font-semibold ${
+                          row.profitRate >= 0
+                            ? "text-gray-900"
+                            : "text-rose-600"
+                        }`}
+                      >
+                        {formatPercent(row.profitRate)}
                       </td>
                     </tr>
-                  ) : (
-                    profitRows.map((row) => {
-                      const partner = partnerById.get(
-                        getOrderPartnerId(row.order)
-                      );
-
-                      return (
-                        <tr key={String(row.order.id)}>
-                          <TableCell className="font-semibold">
-                            {getOrderNumber(row.order)}
-                          </TableCell>
-                          <TableCell>{getPartnerName(partner)}</TableCell>
-                          <TableCell className="text-slate-500">
-                            {getOrderDate(row.order)}
-                          </TableCell>
-                          <TableCell>
-                            {row.isSample ? (
-                              <span className="rounded-full bg-orange-50 px-3 py-1 text-xs font-bold text-orange-700">
-                                샘플
-                              </span>
-                            ) : (
-                              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-                                일반
-                              </span>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right font-bold">
-                            {formatKrw(row.salesAmount)}
-                          </TableCell>
-                          <TableCell className="text-right font-bold">
-                            {formatKrw(row.costAmount)}
-                          </TableCell>
-                          <TableCell
-                            className={`text-right font-bold ${
-                              row.profitAmount >= 0
-                                ? "text-emerald-700"
-                                : "text-red-600"
-                            }`}
-                          >
-                            {formatKrw(row.profitAmount)}
-                          </TableCell>
-                          <TableCell className="text-right font-bold">
-                            {row.isSample ? "-" : `${row.profitRate}%`}
-                          </TableCell>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
-        </>
+        </section>
+      )}
+
+      {isCreateInvoiceOpen && (
+        <InvoiceModal
+          title="세금계산서 등록"
+          description="거래처를 선택하면 해당 거래처의 주문만 표시됩니다."
+          partners={partners}
+          orders={orders}
+          partnerMap={partnerMap}
+          form={invoiceForm}
+          previewTotal={invoiceCreatePreviewTotal}
+          isPending={isPending}
+          onClose={() => setIsCreateInvoiceOpen(false)}
+          onChange={setInvoiceForm}
+          onToggleOrder={toggleOrderInCreateForm}
+          onSubmit={handleCreateInvoice}
+          submitLabel="세금계산서 등록"
+        />
+      )}
+
+      {editInvoiceForm && (
+        <InvoiceModal
+          title="세금계산서 수정"
+          description="거래처를 선택하면 해당 거래처의 주문만 표시됩니다."
+          partners={partners}
+          orders={orders}
+          partnerMap={partnerMap}
+          form={editInvoiceForm}
+          previewTotal={invoiceEditPreviewTotal}
+          isPending={isPending}
+          onClose={() => setEditInvoiceForm(null)}
+          onChange={setEditInvoiceForm}
+          onToggleOrder={toggleOrderInEditForm}
+          onSubmit={handleUpdateInvoice}
+          submitLabel="수정 저장"
+          hidePaidFull
+        />
+      )}
+
+      {selectedInvoice && (
+        <InvoiceDetailModal
+          invoice={selectedInvoice}
+          paymentForm={paymentForm}
+          isPending={isPending}
+          onClose={() => {
+            setSelectedInvoiceId("");
+            setPaymentForm(emptyPaymentForm);
+          }}
+          onPaymentFormChange={setPaymentForm}
+          onCreatePayment={handleCreatePayment}
+          onOpenEditPayment={handleOpenEditPayment}
+          onDeletePayment={handleDeletePayment}
+        />
+      )}
+
+      {editPaymentForm && (
+        <PaymentEditModal
+          form={editPaymentForm}
+          isPending={isPending}
+          onClose={() => setEditPaymentForm(null)}
+          onChange={setEditPaymentForm}
+          onSubmit={handleUpdatePayment}
+        />
       )}
     </div>
   );
 }
 
-function SummaryCard({
-  label,
-  value,
-  valueClassName = "text-slate-900",
-}: {
-  label: string;
-  value: string;
-  valueClassName?: string;
-}) {
+function SummaryCard({ title, value }: { title: string; value: string }) {
   return (
-    <div className="rounded-3xl bg-white p-6 shadow-sm">
-      <div className="text-sm font-semibold text-slate-500">{label}</div>
-      <div className={`mt-2 text-2xl font-black ${valueClassName}`}>
-        {value}
-      </div>
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+      <p className="text-sm font-medium text-gray-500">{title}</p>
+      <p className="mt-2 text-xl font-bold text-gray-900">{value}</p>
     </div>
   );
 }
 
-function TableHead({
-  children,
-  className = "",
-}: {
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    <th className={`px-4 py-4 text-sm font-bold ${className}`}>{children}</th>
-  );
-}
-
-function TableCell({
-  children,
-  className = "",
-}: {
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    <td className={`border-b border-slate-100 px-4 py-4 ${className}`}>
-      {children}
-    </td>
-  );
-}
-
-function CreateTaxInvoiceModal({
-  currentYear,
-  defaultInvoiceNumber,
+function InvoiceModal({
+  title,
+  description,
   partners,
   orders,
-  orderAmountById,
-}: {
-  currentYear: number;
-  defaultInvoiceNumber: string;
-  partners: AnyRow[];
-  orders: AnyRow[];
-  orderAmountById: Map<string, number>;
-}) {
-  const router = useRouter();
-
-  const [open, setOpen] = useState(false);
-  const [partnerId, setPartnerId] = useState("");
-  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
-  const [amount, setAmount] = useState("");
-  const [invoiceNumber, setInvoiceNumber] = useState(defaultInvoiceNumber);
-  const [isPaidOnCreate, setIsPaidOnCreate] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const filteredOrders = useMemo(() => {
-    return orders.filter((order) => {
-      if (!partnerId) return false;
-      return getOrderPartnerId(order) === partnerId;
-    });
-  }, [orders, partnerId]);
-
-  const selectedAmount = useMemo(() => {
-    return selectedOrderIds.reduce((sum, id) => {
-      return sum + (orderAmountById.get(id) ?? 0);
-    }, 0);
-  }, [selectedOrderIds, orderAmountById]);
-
-  function resetModal() {
-    setPartnerId("");
-    setSelectedOrderIds([]);
-    setAmount("");
-    setInvoiceNumber(defaultInvoiceNumber);
-    setIsPaidOnCreate(false);
-  }
-
-  function toggleOrder(orderId: string) {
-    setSelectedOrderIds((prev) => {
-      const exists = prev.includes(orderId);
-
-      const next = exists
-        ? prev.filter((id) => id !== orderId)
-        : [...prev, orderId];
-
-      const nextAmount = next.reduce((sum, id) => {
-        return sum + (orderAmountById.get(id) ?? 0);
-      }, 0);
-
-      setAmount(String(nextAmount));
-
-      if (next.length === 0) {
-        setIsPaidOnCreate(false);
-      }
-
-      return next;
-    });
-  }
-
-  async function handleCreateInvoiceSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const formData = new FormData(event.currentTarget);
-
-    setIsSubmitting(true);
-
-    try {
-      await createTaxInvoiceAction(formData);
-
-      setOpen(false);
-      resetModal();
-      router.refresh();
-    } catch (error) {
-      alert(
-        error instanceof Error
-          ? error.message
-          : "세금계산서 등록 중 오류가 발생했습니다."
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => {
-          setInvoiceNumber(defaultInvoiceNumber);
-          setOpen(true);
-        }}
-        className="h-12 rounded-2xl bg-red-600 px-6 text-sm font-bold text-white shadow-sm hover:bg-red-700"
-      >
-        + 세금계산서 등록
-      </button>
-
-      {open ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white p-6 shadow-xl">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-black">세금계산서 등록</h2>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setOpen(false);
-                  resetModal();
-                }}
-                className="rounded-xl px-3 py-2 text-sm font-bold text-slate-500 hover:bg-slate-100"
-              >
-                닫기
-              </button>
-            </div>
-
-            <form
-              onSubmit={handleCreateInvoiceSubmit}
-              className="mt-6 space-y-5"
-            >
-              <input
-                type="hidden"
-                name="order_ids"
-                value={JSON.stringify(selectedOrderIds)}
-              />
-
-              <input type="hidden" name="total_amount" value={amount} />
-
-              <input
-                type="hidden"
-                name="payment_date"
-                value={new Date().toISOString().slice(0, 10)}
-              />
-
-              <input type="hidden" name="payment_method" value="계좌이체" />
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <label className="space-y-2">
-                  <span className="text-sm font-bold text-slate-600">
-                    계산서 번호
-                  </span>
-                  <input
-                    name="invoice_number"
-                    value={invoiceNumber}
-                    onChange={(event) => setInvoiceNumber(event.target.value)}
-                    className="h-12 w-full rounded-2xl border border-slate-200 px-4 outline-none"
-                    placeholder={`${currentYear}-1`}
-                    required
-                  />
-                </label>
-
-                <label className="space-y-2">
-                  <span className="text-sm font-bold text-slate-600">
-                    발행일
-                  </span>
-                  <input
-                    type="date"
-                    name="issue_date"
-                    defaultValue={new Date().toISOString().slice(0, 10)}
-                    className="h-12 w-full rounded-2xl border border-slate-200 px-4 outline-none"
-                    required
-                  />
-                </label>
-              </div>
-
-              <label className="block space-y-2">
-                <span className="text-sm font-bold text-slate-600">
-                  거래처
-                </span>
-                <select
-                  name="partner_id"
-                  value={partnerId}
-                  onChange={(event) => {
-                    setPartnerId(event.target.value);
-                    setSelectedOrderIds([]);
-                    setAmount("");
-                    setIsPaidOnCreate(false);
-                  }}
-                  className="h-12 w-full rounded-2xl border border-slate-200 px-4 outline-none"
-                  required
-                >
-                  <option value="">거래처 선택</option>
-                  {partners.map((partner) => (
-                    <option key={String(partner.id)} value={String(partner.id)}>
-                      {getPartnerName(partner)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <div className="space-y-2">
-                <div className="text-sm font-bold text-slate-600">
-                  연결 주문
-                </div>
-
-                <div className="max-h-60 overflow-y-auto rounded-2xl border border-slate-200">
-                  {!partnerId ? (
-                    <div className="p-4 text-sm text-slate-400">
-                      거래처를 먼저 선택해주세요.
-                    </div>
-                  ) : filteredOrders.length === 0 ? (
-                    <div className="p-4 text-sm text-slate-400">
-                      연결할 주문이 없습니다.
-                    </div>
-                  ) : (
-                    filteredOrders.map((order) => {
-                      const orderId = String(order.id);
-                      const checked = selectedOrderIds.includes(orderId);
-
-                      return (
-                        <label
-                          key={orderId}
-                          className="flex cursor-pointer items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 last:border-b-0 hover:bg-slate-50"
-                        >
-                          <div className="flex items-center gap-3">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => toggleOrder(orderId)}
-                            />
-
-                            <div>
-                              <div className="font-bold">
-                                #{getOrderNumber(order)}
-                              </div>
-                              <div className="text-xs text-slate-400">
-                                {getOrderDate(order)}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="text-xs font-bold text-slate-400">
-                            {checked ? "선택됨" : "선택"}
-                          </div>
-                        </label>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-
-              {selectedOrderIds.length > 0 ? (
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <label className="flex cursor-pointer items-center justify-between gap-4">
-                    <div>
-                      <div className="text-sm font-black text-slate-800">
-                        입금 완료로 등록
-                      </div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        체크하면 세금계산서 등록과 동시에 입금액도 함께
-                        등록됩니다.
-                      </div>
-                    </div>
-
-                    <input
-                      type="checkbox"
-                      name="is_paid_on_create"
-                      checked={isPaidOnCreate}
-                      onChange={(event) =>
-                        setIsPaidOnCreate(event.target.checked)
-                      }
-                      className="h-5 w-5"
-                    />
-                  </label>
-
-                  <div className="mt-3 text-right text-sm font-bold text-slate-500">
-                    연결 주문 합계 {formatKrw(selectedAmount)}
-                  </div>
-                </div>
-              ) : null}
-
-              <label className="block space-y-2">
-                <span className="text-sm font-bold text-slate-600">메모</span>
-                <textarea
-                  name="memo"
-                  className="min-h-24 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none"
-                  placeholder="필요 시 메모를 입력하세요."
-                />
-              </label>
-
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOpen(false);
-                    resetModal();
-                  }}
-                  className="h-12 rounded-2xl border border-slate-200 px-6 text-sm font-bold"
-                >
-                  취소
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="h-12 rounded-2xl bg-red-600 px-6 text-sm font-bold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-                >
-                  {isSubmitting ? "등록 중..." : "등록"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
-    </>
-  );
-}
-
-function PaymentModal({
-  invoice,
+  partnerMap,
+  form,
+  previewTotal,
+  isPending,
   onClose,
+  onChange,
+  onToggleOrder,
+  onSubmit,
+  submitLabel,
+  hidePaidFull = false,
 }: {
-  invoice: AnyRow | null;
+  title: string;
+  description: string;
+  partners: Row[];
+  orders: Row[];
+  partnerMap: Map<string, Row>;
+  form: InvoiceForm;
+  previewTotal: number;
+  isPending: boolean;
   onClose: () => void;
+  onChange: React.Dispatch<React.SetStateAction<any>>;
+  onToggleOrder: (orderId: string) => void;
+  onSubmit: () => void;
+  submitLabel: string;
+  hidePaidFull?: boolean;
 }) {
-  const router = useRouter();
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const filteredOrders = useMemo(() => {
+    if (!form.partner_id) return [];
 
-  if (!invoice) return null;
-
-  const unpaidAmount = toNumber(invoice.unpaid_amount);
-
-  async function handlePaymentSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const formData = new FormData(event.currentTarget);
-
-    setIsSubmitting(true);
-
-    try {
-      await createTaxInvoicePaymentAction(formData);
-      onClose();
-      router.refresh();
-    } catch (error) {
-      alert(
-        error instanceof Error
-          ? error.message
-          : "입금 등록 중 오류가 발생했습니다."
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
+    return sortByDateDesc(
+      orders.filter((order) => {
+        return String(order.partner_id ?? "") === String(form.partner_id);
+      }),
+      ["order_date", "created_at"],
+    );
+  }, [orders, form.partner_id]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-xl">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-black">입금 등록</h2>
+      <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-5 shadow-xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+            <p className="mt-1 text-sm text-gray-500">{description}</p>
+          </div>
 
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl px-3 py-2 text-sm font-bold text-slate-500 hover:bg-slate-100"
+            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
           >
             닫기
           </button>
         </div>
 
-        <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm">
-          <div className="flex justify-between">
-            <span className="text-slate-500">계산서 번호</span>
-            <span className="font-bold">{invoice.invoice_number}</span>
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <div>
+            <label className="text-sm font-medium text-gray-700">
+              계산서 번호
+            </label>
+            <input
+              value={form.invoice_number}
+              onChange={(event) =>
+                onChange((prev: InvoiceForm) => ({
+                  ...prev,
+                  invoice_number: event.target.value,
+                }))
+              }
+              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-900"
+              placeholder="예: 2026-001"
+            />
           </div>
-          <div className="mt-2 flex justify-between">
-            <span className="text-slate-500">미수금</span>
-            <span className="font-bold text-orange-700">
-              {formatKrw(unpaidAmount)}
-            </span>
+
+          <div>
+            <label className="text-sm font-medium text-gray-700">발행일</label>
+            <input
+              type="date"
+              value={form.issue_date}
+              onChange={(event) =>
+                onChange((prev: InvoiceForm) => ({
+                  ...prev,
+                  issue_date: event.target.value,
+                }))
+              }
+              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-900"
+            />
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="text-sm font-medium text-gray-700">거래처</label>
+            <select
+              value={form.partner_id}
+              onChange={(event) =>
+                onChange((prev: InvoiceForm) => ({
+                  ...prev,
+                  partner_id: event.target.value,
+                  order_ids: [],
+                }))
+              }
+              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-900"
+            >
+              <option value="">거래처 선택</option>
+              {partners.map((partner) => (
+                <option key={getId(partner)} value={getId(partner)}>
+                  {getPartnerName(partner)}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-gray-500">
+              거래처를 변경하면 기존 선택 주문은 초기화됩니다.
+            </p>
+          </div>
+
+          <div className="md:col-span-2">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium text-gray-700">
+                연결 주문
+              </label>
+              <span className="text-xs text-gray-500">
+                {form.order_ids.length}개 선택
+              </span>
+            </div>
+
+            <div className="mt-2 max-h-72 space-y-2 overflow-y-auto rounded-xl border border-gray-200 p-2">
+              {!form.partner_id ? (
+                <div className="rounded-lg bg-gray-50 px-4 py-8 text-center text-sm text-gray-500">
+                  거래처를 먼저 선택해주세요.
+                </div>
+              ) : filteredOrders.length === 0 ? (
+                <div className="rounded-lg bg-gray-50 px-4 py-8 text-center text-sm text-gray-500">
+                  선택한 거래처의 주문이 없습니다.
+                </div>
+              ) : (
+                filteredOrders.map((order) => {
+                  const orderId = getId(order);
+                  const checked = form.order_ids.includes(orderId);
+
+                  return (
+                    <label
+                      key={orderId}
+                      className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm ${
+                        checked
+                          ? "border-gray-900 bg-gray-50"
+                          : "border-gray-200 bg-white"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => onToggleOrder(orderId)}
+                        className="mt-1"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-medium text-gray-900">
+                          {getOrderNumber(order)}
+                        </span>
+                        <span className="block text-xs text-gray-500">
+                          {getOrderDate(order)} ·{" "}
+                          {getPartnerName(
+                            partnerMap.get(String(order.partner_id)),
+                          )}
+                        </span>
+                        <span className="mt-1 block font-semibold text-gray-900">
+                          {formatKrw(getRecordAmount(order))}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-xl bg-gray-50 p-3 md:col-span-2">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-gray-500">선택 주문 합계</span>
+              <span className="font-bold text-gray-900">
+                {formatKrw(previewTotal)}
+              </span>
+            </div>
+          </div>
+
+          {!hidePaidFull && (
+            <label className="flex items-center gap-2 rounded-xl border border-gray-200 p-3 text-sm md:col-span-2">
+              <input
+                type="checkbox"
+                checked={form.paid_full}
+                onChange={(event) =>
+                  onChange((prev: InvoiceForm) => ({
+                    ...prev,
+                    paid_full: event.target.checked,
+                  }))
+                }
+              />
+              <span className="font-medium text-gray-700">
+                등록과 동시에 입금완료 처리
+              </span>
+            </label>
+          )}
+
+          <div className="md:col-span-2">
+            <label className="text-sm font-medium text-gray-700">메모</label>
+            <textarea
+              value={form.memo}
+              onChange={(event) =>
+                onChange((prev: InvoiceForm) => ({
+                  ...prev,
+                  memo: event.target.value,
+                }))
+              }
+              className="mt-1 min-h-24 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-900"
+              placeholder="메모를 입력하세요."
+            />
           </div>
         </div>
 
-        <form onSubmit={handlePaymentSubmit} className="mt-6 space-y-5">
-          <input
-            type="hidden"
-            name="tax_invoice_id"
-            value={String(invoice.id)}
-          />
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700"
+          >
+            취소
+          </button>
+          <button
+            type="button"
+            onClick={onSubmit}
+            disabled={isPending}
+            className="rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {isPending ? "처리 중..." : submitLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-          <label className="block space-y-2">
-            <span className="text-sm font-bold text-slate-600">입금일</span>
-            <input
-              type="date"
-              name="payment_date"
-              defaultValue={new Date().toISOString().slice(0, 10)}
-              className="h-12 w-full rounded-2xl border border-slate-200 px-4 outline-none"
-              required
-            />
-          </label>
+function InvoiceDetailModal({
+  invoice,
+  paymentForm,
+  isPending,
+  onClose,
+  onPaymentFormChange,
+  onCreatePayment,
+  onOpenEditPayment,
+  onDeletePayment,
+}: {
+  invoice: InvoiceView;
+  paymentForm: PaymentForm;
+  isPending: boolean;
+  onClose: () => void;
+  onPaymentFormChange: React.Dispatch<React.SetStateAction<PaymentForm>>;
+  onCreatePayment: () => void;
+  onOpenEditPayment: (payment: Row) => void;
+  onDeletePayment: (payment: Row) => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+      <div className="max-h-[90vh] w-full max-w-6xl overflow-y-auto rounded-2xl bg-white p-5 shadow-xl">
+        <div className="flex flex-col gap-3 border-b border-gray-200 pb-4 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">
+              {invoice.invoice_number} 상세
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              {getPartnerName(invoice.partner)} · {formatDate(invoice.issue_date)}
+            </p>
+          </div>
 
-          <label className="block space-y-2">
-            <span className="text-sm font-bold text-slate-600">입금액</span>
-            <input
-              name="amount"
-              defaultValue={unpaidAmount > 0 ? String(unpaidAmount) : ""}
-              className="h-12 w-full rounded-2xl border border-slate-200 px-4 text-right font-bold outline-none"
-              placeholder="0"
-              required
-            />
-          </label>
-
-          <label className="block space-y-2">
-            <span className="text-sm font-bold text-slate-600">입금 방식</span>
-            <select
-              name="payment_method"
-              className="h-12 w-full rounded-2xl border border-slate-200 px-4 outline-none"
-              defaultValue="계좌이체"
+          <div className="flex items-center gap-2">
+            <span
+              className={`w-fit rounded-full px-3 py-1 text-xs font-semibold ${getStatusClass(
+                invoice.status,
+              )}`}
             >
-              <option value="계좌이체">계좌이체</option>
-              <option value="카드">카드</option>
-              <option value="현금">현금</option>
-              <option value="기타">기타</option>
-            </select>
-          </label>
+              {getStatusText(invoice.status)}
+            </span>
 
-          <label className="block space-y-2">
-            <span className="text-sm font-bold text-slate-600">메모</span>
-            <textarea
-              name="memo"
-              className="min-h-20 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none"
-              placeholder="필요 시 메모를 입력하세요."
-            />
-          </label>
-
-          <div className="flex justify-end gap-2">
             <button
               type="button"
               onClick={onClose}
-              className="h-12 rounded-2xl border border-slate-200 px-6 text-sm font-bold"
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700"
             >
-              취소
-            </button>
-
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="h-12 rounded-2xl bg-red-600 px-6 text-sm font-bold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-            >
-              {isSubmitting ? "등록 중..." : "입금 등록"}
+              닫기
             </button>
           </div>
-        </form>
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-3">
+          <SummaryCard title="합계금액" value={formatKrw(invoice.totalAmount)} />
+          <SummaryCard title="입금액" value={formatKrw(invoice.paidAmount)} />
+          <SummaryCard title="미수금" value={formatKrw(invoice.remainingAmount)} />
+        </div>
+
+        <div className="mt-6">
+          <h3 className="font-semibold text-gray-900">연결 주문</h3>
+
+          <div className="mt-2 overflow-x-auto rounded-xl border border-gray-200">
+            <table className="w-full min-w-[700px] text-sm">
+              <thead className="bg-gray-50 text-left text-xs text-gray-500">
+                <tr>
+                  <th className="px-3 py-2">주문일</th>
+                  <th className="px-3 py-2">주문번호</th>
+                  <th className="px-3 py-2">거래처</th>
+                  <th className="px-3 py-2 text-right">금액</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {invoice.linkedOrders.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="px-3 py-8 text-center text-gray-500"
+                    >
+                      연결된 주문이 없습니다.
+                    </td>
+                  </tr>
+                ) : (
+                  invoice.linkedOrders.map((order) => (
+                    <tr key={getId(order)}>
+                      <td className="px-3 py-2">{getOrderDate(order)}</td>
+                      <td className="px-3 py-2 font-medium text-gray-900">
+                        {getOrderNumber(order)}
+                      </td>
+                      <td className="px-3 py-2">
+                        {getPartnerName(invoice.partner)}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {formatKrw(getRecordAmount(order))}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <h3 className="font-semibold text-gray-900">입금 등록</h3>
+
+          <div className="mt-3 grid gap-3 md:grid-cols-[180px_1fr_1fr_auto]">
+            <input
+              type="date"
+              value={paymentForm.payment_date}
+              onChange={(event) =>
+                onPaymentFormChange((prev) => ({
+                  ...prev,
+                  payment_date: event.target.value,
+                }))
+              }
+              className="rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-900"
+            />
+            <input
+              value={paymentForm.amount}
+              onChange={(event) =>
+                onPaymentFormChange((prev) => ({
+                  ...prev,
+                  amount: event.target.value,
+                }))
+              }
+              className="rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-900"
+              placeholder="입금액"
+            />
+            <input
+              value={paymentForm.memo}
+              onChange={(event) =>
+                onPaymentFormChange((prev) => ({
+                  ...prev,
+                  memo: event.target.value,
+                }))
+              }
+              className="rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-900"
+              placeholder="메모"
+            />
+            <button
+              type="button"
+              onClick={onCreatePayment}
+              disabled={isPending}
+              className="rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              입금 등록
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <h3 className="font-semibold text-gray-900">입금 내역</h3>
+
+          <div className="mt-2 overflow-x-auto rounded-xl border border-gray-200">
+            <table className="w-full min-w-[700px] text-sm">
+              <thead className="bg-gray-50 text-left text-xs text-gray-500">
+                <tr>
+                  <th className="px-3 py-2">입금일</th>
+                  <th className="px-3 py-2 text-right">입금액</th>
+                  <th className="px-3 py-2">메모</th>
+                  <th className="px-3 py-2 text-right">관리</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {invoice.payments.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="px-3 py-8 text-center text-gray-500"
+                    >
+                      입금 내역이 없습니다.
+                    </td>
+                  </tr>
+                ) : (
+                  invoice.payments.map((payment) => (
+                    <tr key={String(payment.id)}>
+                      <td className="px-3 py-2">
+                        {formatDate(payment.payment_date)}
+                      </td>
+                      <td className="px-3 py-2 text-right font-medium">
+                        {formatKrw(payment.amount)}
+                      </td>
+                      <td className="px-3 py-2">{payment.memo || "-"}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => onOpenEditPayment(payment)}
+                            className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700"
+                          >
+                            수정
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onDeletePayment(payment)}
+                            className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-600"
+                          >
+                            삭제
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="mt-5 flex justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700"
+          >
+            닫기
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PaymentEditModal({
+  form,
+  isPending,
+  onClose,
+  onChange,
+  onSubmit,
+}: {
+  form: PaymentForm;
+  isPending: boolean;
+  onClose: () => void;
+  onChange: React.Dispatch<React.SetStateAction<PaymentForm | null>>;
+  onSubmit: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">
+              입금 내역 수정
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              수정 후 미수금 상태가 자동 재계산됩니다.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+          >
+            닫기
+          </button>
+        </div>
+
+        <div className="mt-5 space-y-4">
+          <div>
+            <label className="text-sm font-medium text-gray-700">입금일</label>
+            <input
+              type="date"
+              value={form.payment_date}
+              onChange={(event) =>
+                onChange((prev) =>
+                  prev ? { ...prev, payment_date: event.target.value } : prev,
+                )
+              }
+              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-900"
+            />
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-gray-700">입금액</label>
+            <input
+              value={form.amount}
+              onChange={(event) =>
+                onChange((prev) =>
+                  prev ? { ...prev, amount: event.target.value } : prev,
+                )
+              }
+              className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-900"
+            />
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-gray-700">메모</label>
+            <textarea
+              value={form.memo}
+              onChange={(event) =>
+                onChange((prev) =>
+                  prev ? { ...prev, memo: event.target.value } : prev,
+                )
+              }
+              className="mt-1 min-h-24 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-900"
+            />
+          </div>
+        </div>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700"
+          >
+            취소
+          </button>
+          <button
+            type="button"
+            onClick={onSubmit}
+            disabled={isPending}
+            className="rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            수정 저장
+          </button>
+        </div>
       </div>
     </div>
   );
