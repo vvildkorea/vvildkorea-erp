@@ -45,6 +45,7 @@ export type DashboardData = {
   selectedSalesMonth: number;
   availableYears: number[];
   totalOrders: number;
+  currentYearSales: number;
   monthlyOrders: number;
   monthlySales: number;
   taxInvoiceAmount: number;
@@ -241,6 +242,13 @@ export async function getDashboardData({
     selectedSalesYear,
   ]);
 
+  const currentYearSalesData = buildYearlySalesData({
+    year: currentYear,
+    orders,
+    orderItems,
+    variantPrices,
+  });
+
   const yearlySalesData = buildYearlySalesData({
     year: selectedYear,
     orders,
@@ -266,6 +274,7 @@ export async function getDashboardData({
     selectedSalesMonth,
     availableYears,
     totalOrders: totalOrdersResult.count ?? orders.length,
+    currentYearSales: currentYearSalesData.yearlySales,
     monthlyOrders: currentMonthOrderIds.size,
     monthlySales,
     taxInvoiceAmount,
@@ -313,13 +322,17 @@ export async function getMonthlySalesData({
 }): Promise<MonthlySalesData> {
   const supabase = await createClient();
 
-  const [ordersResult, orderItemsResult, productModelsResult, productVariantsResult] =
-    await Promise.all([
-      supabase.from("orders").select("*"),
-      supabase.from("order_items").select("*"),
-      supabase.from("product_models").select("*"),
-      supabase.from("product_variants").select("*"),
-    ]);
+  const [
+    ordersResult,
+    orderItemsResult,
+    productModelsResult,
+    productVariantsResult,
+  ] = await Promise.all([
+    supabase.from("orders").select("*"),
+    supabase.from("order_items").select("*"),
+    supabase.from("product_models").select("*"),
+    supabase.from("product_variants").select("*"),
+  ]);
 
   const orders = (ordersResult.data ?? []) as AnyRecord[];
   const orderItems = (orderItemsResult.data ?? []) as AnyRecord[];

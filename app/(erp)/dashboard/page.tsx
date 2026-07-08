@@ -58,9 +58,9 @@ export default async function DashboardPage({
         <div className="grid gap-5 lg:grid-cols-3">
           <BigStatCard
             icon="trend"
-            title="전체 주문 수"
-            value={`${formatNumber(data.totalOrders)}건`}
-            description="누적 전체 주문"
+            title="이번연도 총매출"
+            value={formatKrw(data.currentYearSales)}
+            description={`${data.currentYear}년 누적 주문 매출`}
           />
 
           <BigStatCard
