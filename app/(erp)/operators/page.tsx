@@ -96,7 +96,9 @@ const permissionItems: {
 ];
 
 export default async function OperatorsPage() {
-  const currentOperator = await syncCurrentOperator();
+  const currentOperatorRaw = await syncCurrentOperator();
+  const currentOperator = currentOperatorRaw as OperatorLike | null;
+
   const operators = (await getOperators()) as OperatorLike[];
 
   const canManageOperators =
@@ -117,8 +119,7 @@ export default async function OperatorsPage() {
             <p className="font-semibold text-slate-800">현재 로그인 계정</p>
             <p className="mt-1 text-slate-600">
               {currentOperator.email} /{" "}
-              {roleLabels[currentOperator.role as OperatorRole] ??
-                currentOperator.role}
+              {roleLabels[currentOperator.role] ?? currentOperator.role}
             </p>
           </div>
         ) : null}
@@ -143,6 +144,7 @@ export default async function OperatorsPage() {
           {operators.map((operator) => {
             const isOwner = operator.role === "owner";
             const isSelf = currentOperator?.id === operator.id;
+
             const canEditThisOperator =
               canManageOperators &&
               (currentOperator?.role === "owner" || !isOwner);
@@ -188,6 +190,7 @@ export default async function OperatorsPage() {
                         <span className="text-xs font-bold text-slate-500">
                           역할
                         </span>
+
                         <select
                           name="role"
                           defaultValue={operator.role}
@@ -218,6 +221,7 @@ export default async function OperatorsPage() {
                           className="h-4 w-4 rounded border-slate-300"
                         />
                         <span>계정 사용</span>
+
                         {isSelf ? (
                           <span className="ml-auto text-xs text-slate-400">
                             본인 중지 불가
