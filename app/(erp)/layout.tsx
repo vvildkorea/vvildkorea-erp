@@ -149,12 +149,12 @@ export default async function ErpLayout({
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
+    <div className="min-h-dvh bg-slate-50 text-slate-900 md:h-dvh md:overflow-hidden">
       <MobilePermissionMenu menus={allowedMenus} operator={currentOperator} />
 
-      <div className="flex min-h-screen">
-        <aside className="hidden w-64 shrink-0 flex-col border-r border-slate-200 bg-white text-slate-900 md:flex">
-          <div className="flex h-16 items-center border-b border-slate-200 px-6">
+      <div className="flex min-h-[calc(100dvh-3.5rem)] md:h-dvh md:min-h-0">
+        <aside className="hidden h-dvh w-64 shrink-0 flex-col overflow-hidden border-r border-slate-200 bg-white text-slate-900 md:flex">
+          <div className="flex h-16 shrink-0 items-center border-b border-slate-200 px-6">
             <div>
               <div className="text-lg font-bold text-slate-900">
                 vvildkorea
@@ -163,7 +163,7 @@ export default async function ErpLayout({
             </div>
           </div>
 
-          <nav className="flex-1 space-y-1 px-3 py-4">
+          <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-4">
             {allowedMenus.length > 0 ? (
               allowedMenus.map((menu) => (
                 <Link
@@ -181,15 +181,17 @@ export default async function ErpLayout({
             )}
           </nav>
 
-          <div className="border-t border-slate-200 px-4 py-4">
+          <div className="shrink-0 border-t border-slate-200 px-4 py-4">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold text-slate-900">
                   {currentOperator.name || "운영자"}
                 </div>
+
                 <div className="truncate text-xs text-slate-500">
                   {currentOperator.email}
                 </div>
+
                 <div className="mt-1 text-xs font-medium text-slate-400">
                   {roleLabels[currentOperator.role] ?? currentOperator.role}
                 </div>
@@ -202,7 +204,7 @@ export default async function ErpLayout({
           </div>
         </aside>
 
-        <main className="min-w-0 flex-1 bg-slate-50 p-4 text-slate-900 md:p-6">
+        <main className="min-w-0 flex-1 bg-slate-50 p-4 text-slate-900 md:h-dvh md:overflow-y-auto md:p-6">
           <div className="[&_h1]:text-slate-900 [&_h2]:text-slate-900 [&_h3]:text-slate-900 [&_label]:text-slate-700 [&_p]:text-slate-600">
             {children}
           </div>
@@ -231,11 +233,13 @@ function MobilePermissionMenu({
             <div className="text-base font-bold text-slate-900">
               vvildkorea
             </div>
+
             <div className="text-xs text-slate-500">ERP Admin</div>
           </div>
 
           <div className="flex items-center gap-3">
             <UserButton />
+
             <span className="rounded-lg border border-slate-200 px-3 py-1 text-sm font-bold text-slate-700">
               메뉴
             </span>
@@ -247,7 +251,9 @@ function MobilePermissionMenu({
             <p className="text-sm font-bold text-slate-900">
               {operator.name || "운영자"}
             </p>
+
             <p className="mt-1 text-xs text-slate-500">{operator.email}</p>
+
             <p className="mt-1 text-xs font-medium text-slate-400">
               {roleLabels[operator.role] ?? operator.role}
             </p>
@@ -294,21 +300,22 @@ function PermissionDeniedLayout({
   const firstAllowedMenu = menus[0];
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
+    <div className="min-h-dvh bg-slate-50 text-slate-900 md:h-dvh md:overflow-hidden">
       <MobilePermissionMenu menus={menus} operator={operator} />
 
-      <div className="flex min-h-screen">
-        <aside className="hidden w-64 shrink-0 flex-col border-r border-slate-200 bg-white text-slate-900 md:flex">
-          <div className="flex h-16 items-center border-b border-slate-200 px-6">
+      <div className="flex min-h-[calc(100dvh-3.5rem)] md:h-dvh md:min-h-0">
+        <aside className="hidden h-dvh w-64 shrink-0 flex-col overflow-hidden border-r border-slate-200 bg-white text-slate-900 md:flex">
+          <div className="flex h-16 shrink-0 items-center border-b border-slate-200 px-6">
             <div>
               <div className="text-lg font-bold text-slate-900">
                 vvildkorea
               </div>
+
               <div className="text-xs text-slate-500">ERP Admin</div>
             </div>
           </div>
 
-          <nav className="flex-1 space-y-1 px-3 py-4">
+          <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-4">
             {menus.length > 0 ? (
               menus.map((menu) => (
                 <Link
@@ -326,15 +333,17 @@ function PermissionDeniedLayout({
             )}
           </nav>
 
-          <div className="border-t border-slate-200 px-4 py-4">
+          <div className="shrink-0 border-t border-slate-200 px-4 py-4">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold text-slate-900">
                   {operator.name || "운영자"}
                 </div>
+
                 <div className="truncate text-xs text-slate-500">
                   {operator.email}
                 </div>
+
                 <div className="mt-1 text-xs font-medium text-slate-400">
                   {roleLabels[operator.role] ?? operator.role}
                 </div>
@@ -347,7 +356,7 @@ function PermissionDeniedLayout({
           </div>
         </aside>
 
-        <main className="flex min-w-0 flex-1 items-center justify-center bg-slate-50 p-6">
+        <main className="flex min-w-0 flex-1 items-center justify-center bg-slate-50 p-6 md:h-dvh md:overflow-y-auto">
           <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-50 text-lg font-black text-red-600">
               !
@@ -364,6 +373,7 @@ function PermissionDeniedLayout({
 
             <div className="mt-5 rounded-xl bg-slate-50 p-4 text-left text-sm">
               <p className="font-semibold text-slate-800">요청 경로</p>
+
               <p className="mt-1 break-all text-slate-500">
                 {blockedPath || "-"}
               </p>
@@ -407,7 +417,7 @@ function BlockedOperatorLayout({
   operator?: OperatorWithPermissions | null;
 }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
+    <div className="flex min-h-dvh items-center justify-center bg-slate-50 p-6">
       <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-50 text-red-600">
           !
@@ -420,7 +430,9 @@ function BlockedOperatorLayout({
         {operator ? (
           <div className="mt-5 rounded-xl bg-slate-50 p-4 text-left text-sm">
             <p className="font-semibold text-slate-800">현재 로그인 계정</p>
+
             <p className="mt-1 text-slate-600">{operator.email}</p>
+
             <p className="mt-1 text-slate-500">
               {roleLabels[operator.role] ?? operator.role}
             </p>
