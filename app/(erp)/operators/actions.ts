@@ -4,7 +4,13 @@ import { revalidatePath } from "next/cache";
 import { syncCurrentOperator } from "@/lib/operators";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
-const editableRoles = ["owner", "admin", "staff", "viewer", "pending"] as const;
+const editableRoles = [
+  "owner",
+  "admin",
+  "staff",
+  "viewer",
+  "pending",
+] as const;
 
 type OperatorRole = (typeof editableRoles)[number];
 
@@ -24,6 +30,24 @@ function getBooleanValue(formData: FormData, key: string) {
   return formData.get(key) === "on";
 }
 
+function canManageOperators(
+  operator: OperatorWithPermissions | null,
+): operator is OperatorWithPermissions {
+  if (!operator) {
+    return false;
+  }
+
+  if (operator.is_active === false || operator.role === "pending") {
+    return false;
+  }
+
+  return (
+    operator.role === "owner" ||
+    operator.role === "admin" ||
+    operator.can_access_operators === true
+  );
+}
+
 export async function updateOperatorPermissions(formData: FormData) {
   const currentOperator =
     (await syncCurrentOperator()) as OperatorWithPermissions | null;
@@ -32,12 +56,7 @@ export async function updateOperatorPermissions(formData: FormData) {
     throw new Error("로그인 정보를 확인할 수 없습니다.");
   }
 
-  const canManageOperators =
-    currentOperator.role === "owner" ||
-    currentOperator.role === "admin" ||
-    currentOperator.can_access_operators === true;
-
-  if (!canManageOperators) {
+  if (!canManageOperators(currentOperator)) {
     throw new Error("운영자 권한을 수정할 수 있는 권한이 없습니다.");
   }
 
@@ -74,7 +93,9 @@ export async function updateOperatorPermissions(formData: FormData) {
 
   const isSelf = currentOperator.id === operatorId;
 
-  const nextIsActive = isSelf ? true : getBooleanValue(formData, "is_active");
+  const nextIsActive = isSelf
+    ? true
+    : getBooleanValue(formData, "is_active");
 
   const nextPermissions =
     role === "owner"
@@ -93,7 +114,10 @@ export async function updateOperatorPermissions(formData: FormData) {
             formData,
             "can_access_dashboard",
           ),
-          can_access_orders: getBooleanValue(formData, "can_access_orders"),
+          can_access_orders: getBooleanValue(
+            formData,
+            "can_access_orders",
+          ),
           can_access_partners: getBooleanValue(
             formData,
             "can_access_partners",
@@ -132,6 +156,57 @@ export async function updateOperatorPermissions(formData: FormData) {
 
   if (error) {
     throw new Error(error.message);
+  }
+
+  revalidatePath("/operators");
+  revalidatePath("/dashboard");
+}
+
+export async function deleteOperator(formData: FormData) {
+  const currentOperator =
+    (await syncCurrentOperator()) as OperatorWithPermissions | null;
+
+  if (!currentOperator) {
+    throw new Error("로그인 정보를 확인할 수 없습니다.");
+  }
+
+  if (!canManageOperators(currentOperator)) {
+    throw new Error("운영자를 삭제할 수 있는 권한이 없습니다.");
+  }
+
+  const operatorId = String(formData.get("operatorId") ?? "");
+
+  if (!operatorId) {
+    throw new Error("삭제할 운영자 ID가 없습니다.");
+  }
+
+  if (currentOperator.id === operatorId) {
+    throw new Error("현재 로그인한 본인 계정은 삭제할 수 없습니다.");
+  }
+
+  const { data: targetOperator, error: targetError } = await supabaseAdmin
+    .from("operators")
+    .select("id, email, name, role")
+    .eq("id", operatorId)
+    .single();
+
+  if (targetError || !targetOperator) {
+    throw new Error("삭제할 운영자를 찾을 수 없습니다.");
+  }
+
+  const targetRole = String(targetOperator.role ?? "") as OperatorRole;
+
+  if (targetRole === "owner") {
+    throw new Error("최고관리자 계정은 삭제할 수 없습니다.");
+  }
+
+  const { error: deleteError } = await supabaseAdmin
+    .from("operators")
+    .delete()
+    .eq("id", operatorId);
+
+  if (deleteError) {
+    throw new Error(deleteError.message);
   }
 
   revalidatePath("/operators");
