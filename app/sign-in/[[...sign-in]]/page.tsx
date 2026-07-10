@@ -21,10 +21,11 @@ export default function SignInPage() {
 
           .cl-card {
             width: 100% !important;
-            background: rgba(2, 6, 23, 0.94) !important;
-            border: 1px solid rgba(74, 222, 128, 0.28) !important;
-            box-shadow: none !important;
-            color: #f8fafc !important;
+            background: rgba(10, 10, 10, 0.88) !important;
+            border: 1px solid rgba(239, 68, 68, 0.3) !important;
+            box-shadow: 0 0 40px rgba(0, 0, 0, 0.35) !important;
+            color: #ffffff !important;
+            backdrop-filter: blur(12px) !important;
           }
 
           .cl-card * {
@@ -32,36 +33,36 @@ export default function SignInPage() {
           }
 
           .cl-headerTitle {
-            color: #f8fafc !important;
+            color: #ffffff !important;
             font-weight: 800 !important;
           }
 
           .cl-headerSubtitle {
-            color: rgba(220, 252, 231, 0.8) !important;
+            color: rgba(255, 255, 255, 0.72) !important;
           }
 
           .cl-socialButtonsBlockButton {
-            background: rgba(15, 23, 42, 0.96) !important;
-            border: 1px solid rgba(74, 222, 128, 0.45) !important;
-            color: #f8fafc !important;
+            background: rgba(20, 20, 20, 0.92) !important;
+            border: 1px solid rgba(239, 68, 68, 0.35) !important;
+            color: #ffffff !important;
           }
 
           .cl-socialButtonsBlockButton:hover {
-            background: rgba(20, 83, 45, 0.65) !important;
+            background: rgba(127, 29, 29, 0.55) !important;
           }
 
           .cl-socialButtonsBlockButtonText {
-            color: #f8fafc !important;
+            color: #ffffff !important;
             font-weight: 800 !important;
           }
 
           .cl-formFieldLabel {
-            color: rgba(220, 252, 231, 0.95) !important;
+            color: rgba(255, 255, 255, 0.95) !important;
             font-weight: 700 !important;
           }
 
           .cl-formFieldLabelRow {
-            color: rgba(220, 252, 231, 0.95) !important;
+            color: rgba(255, 255, 255, 0.95) !important;
           }
 
           .cl-formFieldLabelRow span,
@@ -70,52 +71,52 @@ export default function SignInPage() {
           .cl-formFieldLabelRow [class*="Badge"],
           .cl-formFieldLabelRow [class*="last"],
           .cl-formFieldLabelRow [class*="Last"] {
-            color: #dcfce7 !important;
+            color: #ffe4e6 !important;
           }
 
           .cl-badge,
           [class*="badge"],
           [class*="Badge"] {
-            background: rgba(15, 23, 42, 0.98) !important;
-            border: 1px solid rgba(74, 222, 128, 0.35) !important;
-            color: #dcfce7 !important;
+            background: rgba(20, 20, 20, 0.98) !important;
+            border: 1px solid rgba(239, 68, 68, 0.32) !important;
+            color: #ffe4e6 !important;
             box-shadow: none !important;
           }
 
           .cl-badge *,
           [class*="badge"] *,
           [class*="Badge"] * {
-            color: #dcfce7 !important;
+            color: #ffe4e6 !important;
           }
 
           .cl-formFieldInput {
             background: rgba(255, 255, 255, 0.98) !important;
-            color: #0f172a !important;
-            border: 1px solid rgba(74, 222, 128, 0.45) !important;
+            color: #111827 !important;
+            border: 1px solid rgba(239, 68, 68, 0.38) !important;
             box-shadow: none !important;
           }
 
           .cl-formFieldInput::placeholder {
-            color: #64748b !important;
+            color: #6b7280 !important;
           }
 
           .cl-formButtonPrimary {
-            background: #22c55e !important;
-            color: #052e16 !important;
+            background: #dc2626 !important;
+            color: #ffffff !important;
             font-weight: 900 !important;
-            box-shadow: 0 0 30px rgba(34, 197, 94, 0.35) !important;
+            box-shadow: 0 0 24px rgba(220, 38, 38, 0.35) !important;
           }
 
           .cl-formButtonPrimary:hover {
-            background: #4ade80 !important;
+            background: #ef4444 !important;
           }
 
           .cl-dividerText {
-            color: rgba(220, 252, 231, 0.72) !important;
+            color: rgba(255, 255, 255, 0.65) !important;
           }
 
           .cl-dividerLine {
-            background: rgba(74, 222, 128, 0.24) !important;
+            background: rgba(255, 255, 255, 0.16) !important;
           }
 
           .cl-footer {
@@ -123,11 +124,11 @@ export default function SignInPage() {
           }
 
           .cl-footerActionText {
-            color: rgba(220, 252, 231, 0.72) !important;
+            color: rgba(255, 255, 255, 0.7) !important;
           }
 
           .cl-footerActionLink {
-            color: #86efac !important;
+            color: #fca5a5 !important;
             font-weight: 800 !important;
           }
 
@@ -139,11 +140,7 @@ export default function SignInPage() {
           .cl-alternativeMethodsBlockButton,
           .cl-breadcrumbsItem,
           .cl-breadcrumbsItemDivider {
-            color: #86efac !important;
-          }
-
-          .cl-internal-1dauvpw {
-            display: none !important;
+            color: #fecaca !important;
           }
         `}
       </style>
@@ -151,7 +148,7 @@ export default function SignInPage() {
       <div className="relative z-10 flex min-h-screen items-center justify-center px-4 py-10">
         <div className="w-full max-w-md">
           <div className="mb-7 text-center">
-            <div className="text-sm font-semibold tracking-[0.35em] text-green-300">
+            <div className="text-sm font-semibold tracking-[0.35em] text-red-200">
               VVILDKOREA
             </div>
 
@@ -159,52 +156,53 @@ export default function SignInPage() {
               ERP Admin
             </h1>
 
-            <p className="mt-3 text-sm font-medium text-green-100/80">
+            <p className="mt-3 text-sm font-medium text-white/80">
               운영자 전용 시스템입니다. Google 계정으로 로그인해 주세요.
             </p>
           </div>
 
-          <div className="rounded-[28px] border border-green-400/25 bg-black/45 p-4 shadow-[0_0_80px_rgba(34,197,94,0.3)] backdrop-blur-xl">
+          <div className="rounded-[28px] border border-white/15 bg-black/45 p-4 shadow-[0_0_80px_rgba(0,0,0,0.35)] backdrop-blur-xl">
             <SignIn
               appearance={{
+                options: {
+                  unsafe_disableDevelopmentModeWarnings: true,
+                },
                 variables: {
-                  colorPrimary: "#22c55e",
-                  colorBackground: "rgba(2, 6, 23, 0.94)",
-                  colorForeground: "#f8fafc",
-                  colorMutedForeground: "#bbf7d0",
+                  colorPrimary: "#dc2626",
+                  colorBackground: "rgba(10, 10, 10, 0.88)",
+                  colorForeground: "#ffffff",
+                  colorMutedForeground: "#f5d0d0",
                   colorInput: "#ffffff",
-                  colorInputForeground: "#0f172a",
+                  colorInputForeground: "#111827",
                   colorDanger: "#fb7185",
                   borderRadius: "1rem",
                 },
                 elements: {
                   rootBox: "w-full",
                   cardBox: "w-full shadow-none",
-                  card: "w-full bg-slate-950/95 shadow-none border border-green-400/20",
+                  card: "w-full bg-black/80 shadow-none border border-red-400/25",
                   headerTitle: "text-white",
-                  headerSubtitle: "text-green-100/80",
+                  headerSubtitle: "text-white/70",
                   socialButtonsBlockButton:
-                    "border border-green-400/30 bg-slate-950 text-white hover:bg-green-950/70",
+                    "border border-red-400/30 bg-black text-white hover:bg-red-950/60",
                   socialButtonsBlockButtonText: "text-white font-bold",
-                  formFieldLabel: "text-green-100 font-bold",
-                  formFieldLabelRow: "text-green-100",
+                  formFieldLabel: "text-white font-bold",
+                  formFieldLabelRow: "text-white",
                   formFieldInput:
-                    "bg-white text-slate-950 placeholder:text-slate-500",
+                    "bg-white text-slate-900 placeholder:text-slate-500",
                   formButtonPrimary:
-                    "bg-green-500 text-green-950 hover:bg-green-400 font-black",
-                  footerActionText: "text-green-100/80",
-                  footerActionLink:
-                    "text-green-300 hover:text-green-200 font-bold",
-                  dividerLine: "bg-green-400/20",
-                  dividerText: "text-green-100/70",
-                  badge:
-                    "bg-slate-950 text-green-100 border border-green-400/30",
+                    "bg-red-600 text-white hover:bg-red-500 font-black",
+                  footerActionText: "text-white/70",
+                  footerActionLink: "text-red-200 hover:text-red-100 font-bold",
+                  dividerLine: "bg-white/15",
+                  dividerText: "text-white/65",
+                  badge: "bg-black text-red-100 border border-red-400/30",
                 },
               }}
             />
           </div>
 
-          <p className="mt-6 text-center text-xs font-medium text-green-100/55">
+          <p className="mt-6 text-center text-xs font-medium text-white/60">
             Authorized operators only · vvildkorea ERP
           </p>
         </div>
