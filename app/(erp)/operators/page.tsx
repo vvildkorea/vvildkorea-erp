@@ -1,5 +1,6 @@
 import { getOperators, syncCurrentOperator } from "@/lib/operators";
 import { updateOperatorPermissions } from "./actions";
+import OperatorDeleteButton from "./operator-delete-button";
 
 export const dynamic = "force-dynamic";
 
@@ -110,6 +111,7 @@ export default async function OperatorsPage() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">운영자 관리</h1>
+
         <p className="mt-2 text-sm text-slate-500">
           직원별 계정 상태와 메뉴 접근 권한을 관리합니다.
         </p>
@@ -117,6 +119,7 @@ export default async function OperatorsPage() {
         {currentOperator ? (
           <div className="mt-5 rounded-xl bg-slate-50 p-4 text-sm">
             <p className="font-semibold text-slate-800">현재 로그인 계정</p>
+
             <p className="mt-1 text-slate-600">
               {currentOperator.email} /{" "}
               {roleLabels[currentOperator.role] ?? currentOperator.role}
@@ -126,8 +129,8 @@ export default async function OperatorsPage() {
 
         {!canManageOperators ? (
           <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-            현재 계정은 운영자 권한을 수정할 수 없습니다. 권한 확인만
-            가능합니다.
+            현재 계정은 운영자 권한을 수정하거나 운영자를 삭제할 수
+            없습니다. 권한 확인만 가능합니다.
           </div>
         ) : null}
       </div>
@@ -135,8 +138,15 @@ export default async function OperatorsPage() {
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 px-6 py-4">
           <h2 className="font-bold text-slate-900">운영자 목록</h2>
+
           <p className="mt-1 text-sm text-slate-500">
             직원별로 접근 가능한 메뉴를 체크한 뒤 저장해 주세요.
+          </p>
+
+          <p className="mt-2 text-xs leading-5 text-slate-400">
+            운영자를 삭제하면 ERP 운영자 목록에서만 제거됩니다. Clerk
+            로그인 계정은 삭제되지 않으며, 해당 사용자가 다시 로그인하면
+            승인 대기 계정으로 다시 등록될 수 있습니다.
           </p>
         </div>
 
@@ -149,152 +159,187 @@ export default async function OperatorsPage() {
               canManageOperators &&
               (currentOperator?.role === "owner" || !isOwner);
 
+            const canDeleteThisOperator =
+              canManageOperators && !isOwner && !isSelf;
+
+            const updateFormId = `operator-update-${operator.id}`;
+
+            let deleteDisabledReason = "";
+
+            if (!canManageOperators) {
+              deleteDisabledReason = "운영자 삭제 권한이 없습니다.";
+            } else if (isOwner) {
+              deleteDisabledReason = "최고관리자 계정은 삭제할 수 없습니다.";
+            } else if (isSelf) {
+              deleteDisabledReason =
+                "현재 로그인한 본인 계정은 삭제할 수 없습니다.";
+            }
+
             return (
-              <form
-                key={operator.id}
-                action={updateOperatorPermissions}
-                className="p-6"
-              >
-                <input type="hidden" name="operatorId" value={operator.id} />
-
+              <div key={operator.id} className="p-6">
                 <div className="grid gap-6 lg:grid-cols-[1.1fr_1.6fr_auto] lg:items-start">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-lg font-bold text-slate-900">
-                        {operator.name || "이름 없음"}
-                      </p>
+                  <form
+                    id={updateFormId}
+                    action={updateOperatorPermissions}
+                    className="contents"
+                  >
+                    <input
+                      type="hidden"
+                      name="operatorId"
+                      value={operator.id}
+                    />
 
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-bold ${
-                          operator.is_active
-                            ? "bg-green-50 text-green-700"
-                            : "bg-red-50 text-red-700"
-                        }`}
-                      >
-                        {operator.is_active ? "사용중" : "중지"}
-                      </span>
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-lg font-bold text-slate-900">
+                          {operator.name || "이름 없음"}
+                        </p>
 
-                      {isSelf ? (
-                        <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-                          현재 계정
-                        </span>
-                      ) : null}
-                    </div>
-
-                    <p className="mt-1 text-sm text-slate-500">
-                      {operator.email}
-                    </p>
-
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-                      <label className="block">
-                        <span className="text-xs font-bold text-slate-500">
-                          역할
-                        </span>
-
-                        <select
-                          name="role"
-                          defaultValue={operator.role}
-                          disabled={!canEditThisOperator}
-                          className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 outline-none disabled:bg-slate-50 disabled:text-slate-400"
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-bold ${
+                            operator.is_active
+                              ? "bg-green-50 text-green-700"
+                              : "bg-red-50 text-red-700"
+                          }`}
                         >
-                          {roleOptions.map((role) => (
-                            <option
-                              key={role.value}
-                              value={role.value}
-                              disabled={
-                                role.value === "owner" &&
-                                currentOperator?.role !== "owner"
-                              }
-                            >
-                              {role.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-
-                      <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
-                        <input
-                          type="checkbox"
-                          name="is_active"
-                          defaultChecked={operator.is_active}
-                          disabled={!canEditThisOperator || isSelf}
-                          className="h-4 w-4 rounded border-slate-300"
-                        />
-                        <span>계정 사용</span>
+                          {operator.is_active ? "사용중" : "중지"}
+                        </span>
 
                         {isSelf ? (
-                          <span className="ml-auto text-xs text-slate-400">
-                            본인 중지 불가
+                          <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
+                            현재 계정
                           </span>
                         ) : null}
-                      </label>
-                    </div>
+                      </div>
 
-                    <div className="mt-4 text-xs text-slate-400">
-                      마지막 로그인:{" "}
-                      {operator.last_login_at
-                        ? new Date(operator.last_login_at).toLocaleString(
-                            "ko-KR",
-                          )
-                        : "-"}
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-bold text-slate-500">
-                      메뉴 접근 권한
-                    </p>
-
-                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                      {permissionItems.map((permission) => {
-                        const checked = isOwner
-                          ? true
-                          : operator[permission.key] ?? false;
-
-                        return (
-                          <label
-                            key={permission.key}
-                            className="flex items-start gap-3 rounded-xl border border-slate-200 p-3 text-sm"
-                          >
-                            <input
-                              type="checkbox"
-                              name={permission.key}
-                              defaultChecked={checked}
-                              disabled={!canEditThisOperator || isOwner}
-                              className="mt-0.5 h-4 w-4 rounded border-slate-300"
-                            />
-
-                            <span>
-                              <span className="block font-bold text-slate-800">
-                                {permission.label}
-                              </span>
-                              <span className="mt-0.5 block text-xs text-slate-400">
-                                {permission.path}
-                              </span>
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
-
-                    {isOwner ? (
-                      <p className="mt-3 text-xs text-slate-400">
-                        최고관리자는 모든 메뉴 접근 권한이 자동으로 적용됩니다.
+                      <p className="mt-1 text-sm text-slate-500">
+                        {operator.email}
                       </p>
-                    ) : null}
-                  </div>
 
-                  <div className="flex lg:justify-end">
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                        <label className="block">
+                          <span className="text-xs font-bold text-slate-500">
+                            역할
+                          </span>
+
+                          <select
+                            name="role"
+                            defaultValue={operator.role}
+                            disabled={!canEditThisOperator}
+                            className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 outline-none disabled:bg-slate-50 disabled:text-slate-400"
+                          >
+                            {roleOptions.map((role) => (
+                              <option
+                                key={role.value}
+                                value={role.value}
+                                disabled={
+                                  role.value === "owner" &&
+                                  currentOperator?.role !== "owner"
+                                }
+                              >
+                                {role.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
+                          <input
+                            type="checkbox"
+                            name="is_active"
+                            defaultChecked={operator.is_active}
+                            disabled={!canEditThisOperator || isSelf}
+                            className="h-4 w-4 rounded border-slate-300"
+                          />
+
+                          <span>계정 사용</span>
+
+                          {isSelf ? (
+                            <span className="ml-auto text-xs text-slate-400">
+                              본인 중지 불가
+                            </span>
+                          ) : null}
+                        </label>
+                      </div>
+
+                      <div className="mt-4 text-xs text-slate-400">
+                        마지막 로그인:{" "}
+                        {operator.last_login_at
+                          ? new Date(
+                              operator.last_login_at,
+                            ).toLocaleString("ko-KR")
+                          : "-"}
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-bold text-slate-500">
+                        메뉴 접근 권한
+                      </p>
+
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        {permissionItems.map((permission) => {
+                          const checked = isOwner
+                            ? true
+                            : operator[permission.key] ?? false;
+
+                          return (
+                            <label
+                              key={permission.key}
+                              className="flex items-start gap-3 rounded-xl border border-slate-200 p-3 text-sm"
+                            >
+                              <input
+                                type="checkbox"
+                                name={permission.key}
+                                defaultChecked={checked}
+                                disabled={
+                                  !canEditThisOperator || isOwner
+                                }
+                                className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                              />
+
+                              <span>
+                                <span className="block font-bold text-slate-800">
+                                  {permission.label}
+                                </span>
+
+                                <span className="mt-0.5 block text-xs text-slate-400">
+                                  {permission.path}
+                                </span>
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+
+                      {isOwner ? (
+                        <p className="mt-3 text-xs text-slate-400">
+                          최고관리자는 모든 메뉴 접근 권한이 자동으로
+                          적용됩니다.
+                        </p>
+                      ) : null}
+                    </div>
+                  </form>
+
+                  <div className="flex flex-col gap-2 lg:items-end">
                     <button
                       type="submit"
+                      form={updateFormId}
                       disabled={!canEditThisOperator}
-                      className="h-11 rounded-xl bg-slate-900 px-5 text-sm font-bold text-white shadow-sm disabled:cursor-not-allowed disabled:bg-slate-300"
+                      className="h-11 w-full rounded-xl bg-slate-900 px-5 text-sm font-bold text-white shadow-sm disabled:cursor-not-allowed disabled:bg-slate-300 lg:w-auto"
                     >
                       저장
                     </button>
+
+                    <OperatorDeleteButton
+                      operatorId={operator.id}
+                      operatorName={operator.name || operator.email}
+                      disabled={!canDeleteThisOperator}
+                      disabledReason={deleteDisabledReason}
+                    />
                   </div>
                 </div>
-              </form>
+              </div>
             );
           })}
 
