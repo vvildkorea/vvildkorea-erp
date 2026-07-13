@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   createTaxInvoice,
   createTaxInvoicePayment,
@@ -64,6 +64,15 @@ type InvoiceView = Row & {
 
 type ProfitYearRow = {
   year: string;
+  orderCount: number;
+  salesAmount: number;
+  costAmount: number;
+  profitAmount: number;
+  profitRate: number;
+};
+
+type ProfitMonthRow = {
+  month: number;
   orderCount: number;
   salesAmount: number;
   costAmount: number;
@@ -161,6 +170,18 @@ function getOrderYear(order?: Row) {
   const dateText = getOrderDate(order);
   if (!dateText || dateText === "-") return "연도 없음";
   return dateText.slice(0, 4);
+}
+
+function getOrderMonth(order?: Row) {
+  const dateText = getOrderDate(order);
+
+  if (!dateText || dateText === "-" || dateText.length < 7) {
+    return 0;
+  }
+
+  const month = Number(dateText.slice(5, 7));
+
+  return Number.isInteger(month) && month >= 1 && month <= 12 ? month : 0;
 }
 
 function getRecordAmount(row: Row) {
@@ -295,6 +316,9 @@ export default function AccountingClient({
   const [editPaymentForm, setEditPaymentForm] =
     useState<PaymentForm | null>(null);
   const [message, setMessage] = useState<ActionResult | null>(null);
+  const [selectedProfitYear, setSelectedProfitYear] = useState(
+    getToday().slice(0, 4),
+  );
   const [isPending, startTransition] = useTransition();
 
   const partnerMap = useMemo(() => {
@@ -465,6 +489,7 @@ export default function AccountingClient({
         id: orderId,
         order,
         year: getOrderYear(order),
+        month: getOrderMonth(order),
         salesAmount,
         costAmount,
         profitAmount,
@@ -502,6 +527,86 @@ export default function AccountingClient({
       String(b.year).localeCompare(String(a.year)),
     );
   }, [orderProfitRows]);
+
+  const profitYearOptions = useMemo(() => {
+    const validYears = yearlyProfitRows
+      .map((row) => row.year)
+      .filter((year) => /^\d{4}$/.test(year));
+
+    const uniqueYears = Array.from(new Set(validYears)).sort((a, b) =>
+      b.localeCompare(a),
+    );
+
+    return uniqueYears.length > 0
+      ? uniqueYears
+      : [getToday().slice(0, 4)];
+  }, [yearlyProfitRows]);
+
+  useEffect(() => {
+    if (!profitYearOptions.includes(selectedProfitYear)) {
+      setSelectedProfitYear(profitYearOptions[0]);
+    }
+  }, [profitYearOptions, selectedProfitYear]);
+
+  const monthlyProfitRows = useMemo<ProfitMonthRow[]>(() => {
+    const rows = Array.from({ length: 12 }, (_, index) => ({
+      month: index + 1,
+      orderCount: 0,
+      salesAmount: 0,
+      costAmount: 0,
+      profitAmount: 0,
+      profitRate: 0,
+    }));
+
+    for (const row of orderProfitRows) {
+      if (
+        row.year !== selectedProfitYear ||
+        row.month < 1 ||
+        row.month > 12
+      ) {
+        continue;
+      }
+
+      const monthRow = rows[row.month - 1];
+
+      monthRow.orderCount += 1;
+      monthRow.salesAmount += row.salesAmount;
+      monthRow.costAmount += row.costAmount;
+      monthRow.profitAmount += row.profitAmount;
+      monthRow.profitRate =
+        monthRow.salesAmount > 0
+          ? (monthRow.profitAmount / monthRow.salesAmount) * 100
+          : 0;
+    }
+
+    return rows;
+  }, [orderProfitRows, selectedProfitYear]);
+
+  const selectedYearProfitSummary = useMemo(() => {
+    const summary = monthlyProfitRows.reduce(
+      (acc, row) => {
+        acc.orderCount += row.orderCount;
+        acc.salesAmount += row.salesAmount;
+        acc.costAmount += row.costAmount;
+        acc.profitAmount += row.profitAmount;
+        return acc;
+      },
+      {
+        orderCount: 0,
+        salesAmount: 0,
+        costAmount: 0,
+        profitAmount: 0,
+        profitRate: 0,
+      },
+    );
+
+    summary.profitRate =
+      summary.salesAmount > 0
+        ? (summary.profitAmount / summary.salesAmount) * 100
+        : 0;
+
+    return summary;
+  }, [monthlyProfitRows]);
 
   const invoiceCreatePreviewTotal = useMemo(() => {
     return invoiceForm.order_ids.reduce((sum, orderId) => {
@@ -877,48 +982,156 @@ export default function AccountingClient({
       )}
 
       {activeTab === "profit" && (
-        <section className="rounded-2xl border border-gray-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-gray-200 p-4">
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900">
-                연도별 손익 계산
-              </h2>
-              <p className="mt-1 text-sm text-gray-500">
-                주문 데이터를 연도별로 합산하여 매출, 상품원가, 이익률을 계산합니다.
-              </p>
+        <div className="space-y-6">
+          <section className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-gray-200 p-4">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">
+                  연도별 손익 계산
+                </h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  주문 데이터를 연도별로 합산하여 매출, 상품원가, 이익률을 계산합니다.
+                </p>
+              </div>
+              <span className="text-sm text-gray-500">
+                총 {yearlyProfitRows.length}개 연도
+              </span>
             </div>
-            <span className="text-sm text-gray-500">
-              총 {yearlyProfitRows.length}개 연도
-            </span>
-          </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-sm">
-              <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                <tr>
-                  <th className="px-4 py-3">연도</th>
-                  <th className="px-4 py-3 text-right">주문건수</th>
-                  <th className="px-4 py-3 text-right">매출</th>
-                  <th className="px-4 py-3 text-right">상품원가</th>
-                  <th className="px-4 py-3 text-right">매출이익</th>
-                  <th className="px-4 py-3 text-right">이익률</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {yearlyProfitRows.length === 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[900px] text-sm">
+                <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
                   <tr>
-                    <td
-                      colSpan={6}
-                      className="px-4 py-10 text-center text-gray-500"
-                    >
-                      손익 계산할 주문이 없습니다.
-                    </td>
+                    <th className="px-4 py-3">연도</th>
+                    <th className="px-4 py-3 text-right">주문건수</th>
+                    <th className="px-4 py-3 text-right">매출</th>
+                    <th className="px-4 py-3 text-right">상품원가</th>
+                    <th className="px-4 py-3 text-right">매출이익</th>
+                    <th className="px-4 py-3 text-right">이익률</th>
                   </tr>
-                ) : (
-                  yearlyProfitRows.map((row) => (
-                    <tr key={row.year}>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {yearlyProfitRows.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={6}
+                        className="px-4 py-10 text-center text-gray-500"
+                      >
+                        손익 계산할 주문이 없습니다.
+                      </td>
+                    </tr>
+                  ) : (
+                    yearlyProfitRows.map((row) => (
+                      <tr key={row.year}>
+                        <td className="px-4 py-3 font-semibold text-gray-900">
+                          {row.year}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {row.orderCount.toLocaleString("ko-KR")}건
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {formatKrw(row.salesAmount)}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {formatKrw(row.costAmount)}
+                        </td>
+                        <td
+                          className={`px-4 py-3 text-right font-semibold ${
+                            row.profitAmount >= 0
+                              ? "text-gray-900"
+                              : "text-rose-600"
+                          }`}
+                        >
+                          {formatKrw(row.profitAmount)}
+                        </td>
+                        <td
+                          className={`px-4 py-3 text-right font-semibold ${
+                            row.profitRate >= 0
+                              ? "text-gray-900"
+                              : "text-rose-600"
+                          }`}
+                        >
+                          {formatPercent(row.profitRate)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+            <div className="flex flex-col gap-3 border-b border-gray-200 p-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">
+                  해당 연도 월별 손익 계산
+                </h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  선택한 연도의 1월부터 12월까지 월별 매출과 상품원가, 이익률을 보여줍니다.
+                </p>
+              </div>
+
+              <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                <span>조회 연도</span>
+                <select
+                  value={selectedProfitYear}
+                  onChange={(event) =>
+                    setSelectedProfitYear(event.target.value)
+                  }
+                  className="h-10 rounded-xl border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-900 outline-none focus:border-gray-900"
+                >
+                  {profitYearOptions.map((year) => (
+                    <option key={year} value={year}>
+                      {year}년
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="grid gap-3 border-b border-gray-200 bg-gray-50 p-4 sm:grid-cols-2 lg:grid-cols-5">
+              <SummaryCard
+                title="연간 주문건수"
+                value={`${selectedYearProfitSummary.orderCount.toLocaleString(
+                  "ko-KR",
+                )}건`}
+              />
+              <SummaryCard
+                title="연간 매출"
+                value={formatKrw(selectedYearProfitSummary.salesAmount)}
+              />
+              <SummaryCard
+                title="연간 상품원가"
+                value={formatKrw(selectedYearProfitSummary.costAmount)}
+              />
+              <SummaryCard
+                title="연간 매출이익"
+                value={formatKrw(selectedYearProfitSummary.profitAmount)}
+              />
+              <SummaryCard
+                title="연간 이익률"
+                value={formatPercent(selectedYearProfitSummary.profitRate)}
+              />
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[900px] text-sm">
+                <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  <tr>
+                    <th className="px-4 py-3">월</th>
+                    <th className="px-4 py-3 text-right">주문건수</th>
+                    <th className="px-4 py-3 text-right">매출</th>
+                    <th className="px-4 py-3 text-right">상품원가</th>
+                    <th className="px-4 py-3 text-right">매출이익</th>
+                    <th className="px-4 py-3 text-right">이익률</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {monthlyProfitRows.map((row) => (
+                    <tr key={row.month}>
                       <td className="px-4 py-3 font-semibold text-gray-900">
-                        {row.year}
+                        {row.month}월
                       </td>
                       <td className="px-4 py-3 text-right">
                         {row.orderCount.toLocaleString("ko-KR")}건
@@ -948,12 +1161,49 @@ export default function AccountingClient({
                         {formatPercent(row.profitRate)}
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
+                  ))}
+                </tbody>
+                <tfoot className="border-t-2 border-gray-200 bg-gray-50 font-semibold text-gray-900">
+                  <tr>
+                    <td className="px-4 py-3">
+                      {selectedProfitYear}년 합계
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {selectedYearProfitSummary.orderCount.toLocaleString(
+                        "ko-KR",
+                      )}
+                      건
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {formatKrw(selectedYearProfitSummary.salesAmount)}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {formatKrw(selectedYearProfitSummary.costAmount)}
+                    </td>
+                    <td
+                      className={`px-4 py-3 text-right ${
+                        selectedYearProfitSummary.profitAmount >= 0
+                          ? "text-gray-900"
+                          : "text-rose-600"
+                      }`}
+                    >
+                      {formatKrw(selectedYearProfitSummary.profitAmount)}
+                    </td>
+                    <td
+                      className={`px-4 py-3 text-right ${
+                        selectedYearProfitSummary.profitRate >= 0
+                          ? "text-gray-900"
+                          : "text-rose-600"
+                      }`}
+                    >
+                      {formatPercent(selectedYearProfitSummary.profitRate)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </section>
+        </div>
       )}
 
       {isCreateInvoiceOpen && (
