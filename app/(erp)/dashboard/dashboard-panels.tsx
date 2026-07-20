@@ -40,17 +40,20 @@ export function YearlySalesPanel({
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <IconBadge icon="trend" />
+
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-black text-slate-900">
                 연도별 월별 매출
               </h2>
+
               {isPending ? (
                 <span className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-bold text-red-600">
                   불러오는 중
                 </span>
               ) : null}
             </div>
+
             <p className="mt-1 text-sm text-slate-500">
               {data.year}년 주문 기준 매출 흐름입니다.
             </p>
@@ -79,6 +82,7 @@ export function YearlySalesPanel({
           label={`${data.year}년 매출`}
           value={formatKrw(data.yearlySales)}
         />
+
         <SmallSummaryBox
           label={`${data.year}년 매출이익`}
           value={formatKrw(data.yearlyProfit)}
@@ -86,6 +90,7 @@ export function YearlySalesPanel({
             data.yearlyProfit < 0 ? "text-red-600" : "text-slate-900"
           }
         />
+
         <SmallSummaryBox
           label={`${data.year}년 이익률`}
           value={formatPercent(data.yearlyProfitRate)}
@@ -109,6 +114,11 @@ export function MonthlySalesPanel({
   const [selectedMonth, setSelectedMonth] = useState(initialData.month);
   const [data, setData] = useState(initialData);
   const [isPending, startTransition] = useTransition();
+
+  const selectedMonthTotalSales = data.selectedMonthSalesItems.reduce(
+    (sum, item) => sum + item.salesAmount,
+    0,
+  );
 
   function loadMonthlyData(nextYear: number, nextMonth: number) {
     startTransition(async () => {
@@ -153,15 +163,16 @@ export function MonthlySalesPanel({
             <h2 className="text-xl font-black text-slate-900">
               월별 판매 내역
             </h2>
+
             {isPending ? (
               <span className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-bold text-red-600">
                 불러오는 중
               </span>
             ) : null}
           </div>
+
           <p className="mt-1 text-sm text-slate-500">
-            {data.year}년 {data.month}월 기준 상품별 판매수량과
-            매출액입니다.
+            {data.year}년 {data.month}월 기준 상품별 판매수량과 매출액입니다.
           </p>
         </div>
 
@@ -195,11 +206,36 @@ export function MonthlySalesPanel({
       </div>
 
       <div
-        className={`mt-6 overflow-hidden rounded-3xl border border-slate-100 ${
+        className={`mt-6 rounded-3xl bg-[#fff7f4] p-5 transition-opacity ${
+          isPending ? "opacity-60" : "opacity-100"
+        }`}
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-bold text-slate-500">
+              {data.year}년 {data.month}월 총 매출액
+            </p>
+
+            <p className="mt-2 text-2xl font-black tracking-tight text-slate-900">
+              {formatKrw(selectedMonthTotalSales)}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-white px-4 py-2 text-xs font-black text-slate-600 shadow-sm">
+              판매 상품{" "}
+              {formatNumber(data.selectedMonthSalesItems.length)}개
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div
+        className={`mt-5 overflow-x-auto rounded-3xl border border-slate-100 ${
           isPending ? "opacity-60" : ""
         }`}
       >
-        <table className="w-full text-left text-sm">
+        <table className="w-full min-w-[720px] text-left text-sm">
           <thead className="bg-[#fbf5f2] text-slate-500">
             <tr>
               <th className="px-4 py-4 font-bold">모델</th>
@@ -220,11 +256,15 @@ export function MonthlySalesPanel({
                   <td className="px-4 py-4 font-bold text-slate-900">
                     {item.modelName}
                   </td>
+
                   <td className="px-4 py-4">{item.optionName}</td>
+
                   <td className="px-4 py-4">{item.nicotine}</td>
+
                   <td className="px-4 py-4 text-right font-bold">
                     {formatNumber(item.quantity)}
                   </td>
+
                   <td className="px-4 py-4 text-right font-black text-slate-900">
                     {formatKrw(item.salesAmount)}
                   </td>
@@ -257,6 +297,7 @@ export function MonthlySalesPanel({
 function MonthlyBarChart({ values }: { values: number[] }) {
   const maxValue = Math.max(...values, 1);
   const chartMax = getNiceChartMax(maxValue);
+
   const chartLabels = [
     chartMax,
     chartMax * 0.75,
@@ -303,6 +344,7 @@ function MonthlyBarChart({ values }: { values: number[] }) {
                       title={`${index + 1}월 ${formatKrw(value)}`}
                     />
                   </div>
+
                   <span className="text-xs font-bold text-slate-500">
                     {index + 1}월
                   </span>
@@ -328,6 +370,7 @@ function SmallSummaryBox({
   return (
     <div className="rounded-3xl bg-[#fff7f4] p-4">
       <p className="text-xs font-bold text-slate-500">{label}</p>
+
       <p
         className={`mt-2 text-lg font-black ${
           valueClassName ?? "text-slate-900"
@@ -365,7 +408,11 @@ function updateDashboardQuery(key: string, value: string) {
 
   url.searchParams.set(key, value);
 
-  window.history.replaceState(null, "", `${url.pathname}?${url.searchParams}`);
+  window.history.replaceState(
+    null,
+    "",
+    `${url.pathname}?${url.searchParams}`,
+  );
 }
 
 function formatKrw(value: number) {
@@ -394,7 +441,10 @@ function formatPercent(value: number) {
 
 function trimDecimal(value: number) {
   const rounded = Math.round(value * 10) / 10;
-  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+
+  return Number.isInteger(rounded)
+    ? String(rounded)
+    : rounded.toFixed(1);
 }
 
 function getNiceChartMax(value: number) {
