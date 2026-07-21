@@ -48,7 +48,9 @@ export type DashboardData = {
   currentYearSales: number;
   monthlyOrders: number;
   monthlySales: number;
+  totalOrderSalesAmount: number;
   taxInvoiceAmount: number;
+  unissuedTaxInvoiceAmount: number;
   paidAmount: number;
   unpaidAmount: number;
   lowStockItems: LowStockItem[];
@@ -91,6 +93,7 @@ export async function getDashboardData({
     variantPricesResult,
     taxInvoiceSummaryResult,
     taxInvoicesResult,
+    taxInvoiceOrdersResult,
     taxPaymentsResult,
     inventoryResult,
   ] = await Promise.all([
@@ -104,6 +107,9 @@ export async function getDashboardData({
       .select("product_variant_id, partner_type, price"),
     supabase.from("tax_invoice_summary").select("*"),
     supabase.from("tax_invoices").select("*"),
+    supabase
+      .from("tax_invoice_orders")
+      .select("tax_invoice_id, order_id"),
     supabase.from("tax_invoice_payments").select("*"),
     supabase.from("current_inventory").select("*"),
   ]);
@@ -117,6 +123,7 @@ export async function getDashboardData({
     variantPricesResult.error?.message,
     taxInvoiceSummaryResult.error?.message,
     taxInvoicesResult.error?.message,
+    taxInvoiceOrdersResult.error?.message,
     taxPaymentsResult.error?.message,
     inventoryResult.error?.message,
   ].filter(Boolean) as string[];
@@ -128,6 +135,7 @@ export async function getDashboardData({
   const variantPrices = (variantPricesResult.data ?? []) as AnyRecord[];
   const taxInvoiceSummary = (taxInvoiceSummaryResult.data ?? []) as AnyRecord[];
   const taxInvoices = (taxInvoicesResult.data ?? []) as AnyRecord[];
+  const taxInvoiceOrders = (taxInvoiceOrdersResult.data ?? []) as AnyRecord[];
   const taxPayments = (taxPaymentsResult.data ?? []) as AnyRecord[];
   const inventory = (inventoryResult.data ?? []) as AnyRecord[];
 
@@ -150,6 +158,58 @@ export async function getDashboardData({
     (sum, item) => sum + getItemSalesAmount(item),
     0,
   );
+
+  const orderItemsByOrderId = new Map<string, AnyRecord[]>();
+
+  orderItems.forEach((item) => {
+    const orderId = getStringByKeys(item, ["order_id", "orderId"]);
+
+    if (!orderId) {
+      return;
+    }
+
+    const items = orderItemsByOrderId.get(orderId) ?? [];
+    items.push(item);
+    orderItemsByOrderId.set(orderId, items);
+  });
+
+  const orderSalesAmountMap = new Map<string, number>();
+
+  orders.forEach((order) => {
+    const orderId = getStringByKeys(order, ["id", "order_id"]);
+
+    if (!orderId) {
+      return;
+    }
+
+    const orderSalesAmount = getOrderSalesAmount(
+      order,
+      orderItemsByOrderId.get(orderId) ?? [],
+    );
+
+    orderSalesAmountMap.set(orderId, orderSalesAmount);
+  });
+
+  const totalOrderSalesAmount = Array.from(
+    orderSalesAmountMap.values(),
+  ).reduce((sum, amount) => sum + amount, 0);
+
+  const linkedOrderIds = new Set(
+    taxInvoiceOrders
+      .map((link) => getStringByKeys(link, ["order_id", "orderId"]))
+      .filter(Boolean),
+  );
+
+  const linkedOrderSalesAmount = Array.from(linkedOrderIds).reduce(
+    (sum, orderId) => sum + (orderSalesAmountMap.get(orderId) ?? 0),
+    0,
+  );
+
+  const unlinkedOrderSalesAmount = Array.from(
+    orderSalesAmountMap.entries(),
+  ).reduce((sum, [orderId, amount]) => {
+    return linkedOrderIds.has(orderId) ? sum : sum + amount;
+  }, 0);
 
   const taxInvoiceAmountFromSummary = sumRowsByKeys(taxInvoiceSummary, [
     "invoice_total_amount",
@@ -197,10 +257,18 @@ export async function getDashboardData({
     "balance_amount",
   ]);
 
-  const taxInvoiceAmount =
+  const fallbackTaxInvoiceAmount =
     taxInvoiceAmountFromSummary > 0
       ? taxInvoiceAmountFromSummary
       : taxInvoiceAmountFromInvoices;
+
+  const taxInvoiceAmount = taxInvoiceOrdersResult.error
+    ? fallbackTaxInvoiceAmount
+    : linkedOrderSalesAmount;
+
+  const unissuedTaxInvoiceAmount = taxInvoiceOrdersResult.error
+    ? Math.max(totalOrderSalesAmount - taxInvoiceAmount, 0)
+    : unlinkedOrderSalesAmount;
 
   const paidAmount =
     paidAmountFromSummary > 0 ? paidAmountFromSummary : paidAmountFromPayments;
@@ -277,7 +345,9 @@ export async function getDashboardData({
     currentYearSales: currentYearSalesData.yearlySales,
     monthlyOrders: currentMonthOrderIds.size,
     monthlySales,
+    totalOrderSalesAmount,
     taxInvoiceAmount,
+    unissuedTaxInvoiceAmount,
     paidAmount,
     unpaidAmount,
     lowStockItems,
@@ -709,6 +779,24 @@ function getOrderDate(order: AnyRecord) {
   ]);
 
   return rawDate.slice(0, 10);
+}
+
+function getOrderSalesAmount(order: AnyRecord, items: AnyRecord[]) {
+  const orderAmount = getNumberByKeys(order, [
+    "total_amount",
+    "order_total",
+    "final_amount",
+    "sales_amount",
+    "amount",
+    "total_price",
+    "supply_amount",
+  ]);
+
+  if (orderAmount > 0) {
+    return orderAmount;
+  }
+
+  return items.reduce((sum, item) => sum + getItemSalesAmount(item), 0);
 }
 
 function getItemSalesAmount(item: AnyRecord) {
