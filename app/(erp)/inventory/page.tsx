@@ -38,6 +38,19 @@ function formatNumber(value: number | null | undefined) {
   return new Intl.NumberFormat("ko-KR").format(Number(value || 0));
 }
 
+function getActualQuantityClass(quantity: number) {
+  if (quantity < 0) return "text-red-600";
+  if (quantity === 0) return "text-yellow-600";
+  return "text-emerald-700";
+}
+
+function getStockRateClass(rate: number, baseQuantity: number) {
+  if (baseQuantity <= 0) return "text-gray-400";
+  if (rate <= 0) return "text-red-600";
+  if (rate <= 20) return "text-yellow-600";
+  return "text-emerald-700";
+}
+
 export default async function InventoryPage() {
   const supabase = createClient();
 
@@ -87,7 +100,7 @@ export default async function InventoryPage() {
     if (inventory.product_variant_id) {
       inventoryMap.set(
         String(inventory.product_variant_id),
-        Number(inventory.current_quantity || 0)
+        Number(inventory.current_quantity || 0),
       );
     }
   });
@@ -124,7 +137,7 @@ export default async function InventoryPage() {
       variant.product_model_id ||
         variant.model_id ||
         variant.product_id ||
-        ""
+        "",
     );
 
     const model = modelMap.get(modelId);
@@ -132,13 +145,13 @@ export default async function InventoryPage() {
     const category = getValue(
       model,
       ["category", "product_category", "type"],
-      getValue(variant, ["category", "product_category", "type"], "-")
+      getValue(variant, ["category", "product_category", "type"], "-"),
     );
 
     const modelName = getValue(
       model,
       ["model_name", "name", "product_name", "title"],
-      getValue(variant, ["model_name", "product_name"], "-")
+      getValue(variant, ["model_name", "product_name"], "-"),
     );
 
     const optionName = getValue(variant, [
@@ -150,6 +163,7 @@ export default async function InventoryPage() {
     ]);
 
     const productVariantId = String(variant.id);
+
     const summary = movementSummaryMap.get(productVariantId) || {
       baseQuantity: 0,
       outboundQuantity: 0,
@@ -171,6 +185,7 @@ export default async function InventoryPage() {
     });
 
     return {
+      modelId,
       productVariantId,
       categoryLabel,
       modelName,
@@ -183,19 +198,83 @@ export default async function InventoryPage() {
   });
 
   rows.sort((a, b) => {
-    const categoryCompare = a.categoryLabel.localeCompare(b.categoryLabel, "ko");
+    const categoryCompare = a.categoryLabel.localeCompare(
+      b.categoryLabel,
+      "ko",
+    );
+
     if (categoryCompare !== 0) return categoryCompare;
 
     const modelCompare = a.modelName.localeCompare(b.modelName, "ko");
+
     if (modelCompare !== 0) return modelCompare;
 
     return a.optionName.localeCompare(b.optionName, "ko");
   });
 
+  const modelSummaryMap = new Map<
+    string,
+    {
+      id: string;
+      categoryLabel: string;
+      modelName: string;
+      optionCount: number;
+      baseQuantity: number;
+      actualQuantity: number;
+      outboundQuantity: number;
+    }
+  >();
+
+  rows.forEach((row) => {
+    const summaryKey =
+      row.modelId || `${row.categoryLabel}-${row.modelName}`;
+
+    const previous = modelSummaryMap.get(summaryKey) || {
+      id: summaryKey,
+      categoryLabel: row.categoryLabel,
+      modelName: row.modelName,
+      optionCount: 0,
+      baseQuantity: 0,
+      actualQuantity: 0,
+      outboundQuantity: 0,
+    };
+
+    previous.optionCount += 1;
+    previous.baseQuantity += row.baseQuantity;
+    previous.actualQuantity += row.actualQuantity;
+    previous.outboundQuantity += row.outboundQuantity;
+
+    modelSummaryMap.set(summaryKey, previous);
+  });
+
+  const modelSummaryRows = Array.from(modelSummaryMap.values())
+    .map((summary) => {
+      const stockRate =
+        summary.baseQuantity > 0
+          ? (summary.actualQuantity / summary.baseQuantity) * 100
+          : 0;
+
+      return {
+        ...summary,
+        stockRate,
+      };
+    })
+    .sort((a, b) => {
+      const categoryCompare = a.categoryLabel.localeCompare(
+        b.categoryLabel,
+        "ko",
+      );
+
+      if (categoryCompare !== 0) return categoryCompare;
+
+      return a.modelName.localeCompare(b.modelName, "ko");
+    });
+
   const movementRows = movements.map((movement) => {
     const productVariantId = String(movement.product_variant_id || "");
     const variantInfo = variantInfoMap.get(productVariantId);
     const orderId = movement.order_id ? String(movement.order_id) : null;
+
     const importOrderId = movement.import_order_id
       ? String(movement.import_order_id)
       : null;
@@ -217,18 +296,22 @@ export default async function InventoryPage() {
   });
 
   const totalSkuCount = rows.length;
+
   const totalBaseQuantity = rows.reduce(
     (sum, row) => sum + row.baseQuantity,
-    0
+    0,
   );
+
   const totalActualQuantity = rows.reduce(
     (sum, row) => sum + row.actualQuantity,
-    0
+    0,
   );
+
   const totalOutboundQuantity = rows.reduce(
     (sum, row) => sum + row.outboundQuantity,
-    0
+    0,
   );
+
   const totalStockRate =
     totalBaseQuantity > 0
       ? (totalActualQuantity / totalBaseQuantity) * 100
@@ -245,7 +328,8 @@ export default async function InventoryPage() {
       <div>
         <h1 className="text-2xl font-bold text-gray-900">재고 관리</h1>
         <p className="mt-1 text-sm text-gray-500">
-          제품별 현재재고, 실재고, 출고수량, 재고율을 확인합니다.
+          모델별 재고 합계와 품목별 현재재고, 실재고, 출고수량을
+          확인합니다.
         </p>
       </div>
 
@@ -254,16 +338,20 @@ export default async function InventoryPage() {
           <p className="font-semibold">
             재고 데이터를 불러오는 중 오류가 있습니다.
           </p>
+
           <div className="mt-2 space-y-1">
             {variantsResult.error ? (
               <p>product_variants: {variantsResult.error.message}</p>
             ) : null}
+
             {modelsResult.error ? (
               <p>product_models: {modelsResult.error.message}</p>
             ) : null}
+
             {inventoryResult.error ? (
               <p>current_inventory: {inventoryResult.error.message}</p>
             ) : null}
+
             {movementsResult.error ? (
               <p>inventory_movements: {movementsResult.error.message}</p>
             ) : null}
@@ -299,10 +387,109 @@ export default async function InventoryPage() {
             {formatNumber(totalOutboundQuantity)}
           </p>
           <p className="mt-1 text-sm text-gray-500">
-            재고율 {totalBaseQuantity > 0 ? totalStockRate.toFixed(1) : "0.0"}%
+            재고율{" "}
+            {totalBaseQuantity > 0 ? totalStockRate.toFixed(1) : "0.0"}%
           </p>
         </div>
       </div>
+
+      <section className="overflow-hidden rounded-xl border bg-white shadow-sm">
+        <div className="flex flex-col gap-3 border-b px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">
+              모델별 재고 현황
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              같은 모델에 등록된 모든 맛과 색상의 재고수량을 합산합니다.
+            </p>
+          </div>
+
+          <span className="w-fit rounded-full bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white">
+            총 {formatNumber(modelSummaryRows.length)}개 모델
+          </span>
+        </div>
+
+        {modelSummaryRows.length === 0 ? (
+          <div className="px-5 py-12 text-center text-sm text-gray-500">
+            등록된 제품 모델이 없습니다.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="whitespace-nowrap px-4 py-3 text-left font-semibold text-gray-600">
+                    카테고리
+                  </th>
+                  <th className="whitespace-nowrap px-4 py-3 text-left font-semibold text-gray-600">
+                    모델명
+                  </th>
+                  <th className="whitespace-nowrap px-4 py-3 text-right font-semibold text-gray-600">
+                    옵션 수
+                  </th>
+                  <th className="whitespace-nowrap px-4 py-3 text-right font-semibold text-gray-600">
+                    현재재고
+                  </th>
+                  <th className="whitespace-nowrap px-4 py-3 text-right font-semibold text-gray-600">
+                    실재고
+                  </th>
+                  <th className="whitespace-nowrap px-4 py-3 text-right font-semibold text-gray-600">
+                    출고수량
+                  </th>
+                  <th className="whitespace-nowrap px-4 py-3 text-right font-semibold text-gray-600">
+                    재고율
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-gray-100 bg-white">
+                {modelSummaryRows.map((row) => (
+                  <tr key={row.id} className="hover:bg-gray-50">
+                    <td className="whitespace-nowrap px-4 py-3 text-gray-700">
+                      {row.categoryLabel}
+                    </td>
+
+                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-gray-900">
+                      {row.modelName}
+                    </td>
+
+                    <td className="whitespace-nowrap px-4 py-3 text-right text-gray-700">
+                      {formatNumber(row.optionCount)}개
+                    </td>
+
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-semibold text-gray-900">
+                      {formatNumber(row.baseQuantity)}
+                    </td>
+
+                    <td
+                      className={`whitespace-nowrap px-4 py-3 text-right font-bold ${getActualQuantityClass(
+                        row.actualQuantity,
+                      )}`}
+                    >
+                      {formatNumber(row.actualQuantity)}
+                    </td>
+
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-semibold text-gray-900">
+                      {formatNumber(row.outboundQuantity)}
+                    </td>
+
+                    <td
+                      className={`whitespace-nowrap px-4 py-3 text-right font-semibold ${getStockRateClass(
+                        row.stockRate,
+                        row.baseQuantity,
+                      )}`}
+                    >
+                      {row.baseQuantity <= 0
+                        ? "-"
+                        : `${row.stockRate.toFixed(1)}%`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <div className="rounded-xl border bg-blue-50 p-4 text-sm text-blue-800">
         <p className="font-semibold">재고 기준</p>
