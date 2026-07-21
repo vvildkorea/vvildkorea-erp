@@ -329,6 +329,27 @@ export default function AccountingClient({
     return new Map(orders.map((order) => [getId(order), order]));
   }, [orders]);
 
+  const linkedOrderIdSet = useMemo(() => {
+    return new Set(
+      taxInvoiceOrders
+        .map((link) => String(link.order_id ?? ""))
+        .filter(Boolean),
+    );
+  }, [taxInvoiceOrders]);
+
+  const editUnavailableOrderIdSet = useMemo(() => {
+    const currentInvoiceId = String(editInvoiceForm?.id ?? "");
+
+    return new Set(
+      taxInvoiceOrders
+        .filter((link) => {
+          return String(link.tax_invoice_id ?? "") !== currentInvoiceId;
+        })
+        .map((link) => String(link.order_id ?? ""))
+        .filter(Boolean),
+    );
+  }, [taxInvoiceOrders, editInvoiceForm?.id]);
+
   const invoices = useMemo<InvoiceView[]>(() => {
     return sortByDateDesc(taxInvoices, ["issue_date", "created_at"]).map(
       (invoice): InvoiceView => {
@@ -1209,10 +1230,11 @@ export default function AccountingClient({
       {isCreateInvoiceOpen && (
         <InvoiceModal
           title="세금계산서 등록"
-          description="거래처를 선택하면 해당 거래처의 주문만 표시됩니다."
+          description="거래처를 선택하면 아직 다른 세금계산서에 연결되지 않은 주문만 표시됩니다."
           partners={partners}
           orders={orders}
           partnerMap={partnerMap}
+          excludedOrderIds={linkedOrderIdSet}
           form={invoiceForm}
           previewTotal={invoiceCreatePreviewTotal}
           isPending={isPending}
@@ -1227,10 +1249,11 @@ export default function AccountingClient({
       {editInvoiceForm && (
         <InvoiceModal
           title="세금계산서 수정"
-          description="거래처를 선택하면 해당 거래처의 주문만 표시됩니다."
+          description="현재 계산서에 연결된 주문과 아직 연결되지 않은 주문만 표시됩니다."
           partners={partners}
           orders={orders}
           partnerMap={partnerMap}
+          excludedOrderIds={editUnavailableOrderIdSet}
           form={editInvoiceForm}
           previewTotal={invoiceEditPreviewTotal}
           isPending={isPending}
@@ -1287,6 +1310,7 @@ function InvoiceModal({
   partners,
   orders,
   partnerMap,
+  excludedOrderIds,
   form,
   previewTotal,
   isPending,
@@ -1302,6 +1326,7 @@ function InvoiceModal({
   partners: Row[];
   orders: Row[];
   partnerMap: Map<string, Row>;
+  excludedOrderIds: Set<string>;
   form: InvoiceForm;
   previewTotal: number;
   isPending: boolean;
@@ -1317,11 +1342,16 @@ function InvoiceModal({
 
     return sortByDateDesc(
       orders.filter((order) => {
-        return String(order.partner_id ?? "") === String(form.partner_id);
+        const isSamePartner =
+          String(order.partner_id ?? "") === String(form.partner_id);
+
+        const isAlreadyLinked = excludedOrderIds.has(getId(order));
+
+        return isSamePartner && !isAlreadyLinked;
       }),
       ["order_date", "created_at"],
     );
-  }, [orders, form.partner_id]);
+  }, [orders, form.partner_id, excludedOrderIds]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
