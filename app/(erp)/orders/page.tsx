@@ -31,6 +31,12 @@ type OrdersPageProps = {
   searchParams?: Promise<SearchParams> | SearchParams;
 };
 
+type TaxInvoiceInfo = {
+  id: string;
+  invoiceNumber: string;
+  issueDate: string;
+};
+
 async function getRowsFromFirstAvailableTable(
   supabase: any,
   tableNames: string[],
@@ -251,9 +257,7 @@ function isSameName(a: any, b: any) {
   return left === right;
 }
 
-function getSelectedTab(
-  value: string | string[] | undefined,
-): OrderTab {
+function getSelectedTab(value: string | string[] | undefined): OrderTab {
   const rawValue = Array.isArray(value) ? value[0] : value;
 
   return rawValue === "sample" ? "sample" : "order";
@@ -289,6 +293,48 @@ function getOrderType(order: any): OrderTab {
   return "order";
 }
 
+function formatDate(value: any) {
+  const text = String(value || "");
+  return text ? text.slice(0, 10) : "";
+}
+
+function TaxInvoiceStatus({ order }: { order: any }) {
+  const orderType = getOrderType(order);
+  const taxInvoiceInfo = order.taxInvoiceInfo as TaxInvoiceInfo | null;
+
+  if (orderType === "sample") {
+    return (
+      <span className="inline-flex rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-500">
+        해당없음
+      </span>
+    );
+  }
+
+  if (!taxInvoiceInfo) {
+    return (
+      <span className="inline-flex rounded-full bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700">
+        미발행
+      </span>
+    );
+  }
+
+  return (
+    <div className="min-w-[120px]">
+      <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+        발행
+      </span>
+      <p className="mt-1 truncate text-xs font-medium text-gray-700">
+        {taxInvoiceInfo.invoiceNumber || "번호 없음"}
+      </p>
+      {taxInvoiceInfo.issueDate ? (
+        <p className="mt-0.5 text-xs text-gray-400">
+          {taxInvoiceInfo.issueDate}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export default async function OrdersPage({
   searchParams,
 }: OrdersPageProps) {
@@ -303,6 +349,8 @@ export default async function OrdersPage({
     productModels,
     productVariants,
     productPrices,
+    taxInvoiceOrdersResult,
+    taxInvoicesResult,
   ] = await Promise.all([
     supabase
       .from("orders")
@@ -313,13 +361,63 @@ export default async function OrdersPage({
     getRowsFromFirstAvailableTable(supabase, PRODUCT_MODEL_TABLES),
     getRowsFromFirstAvailableTable(supabase, PRODUCT_VARIANT_TABLES),
     getRowsFromFirstAvailableTable(supabase, PRODUCT_PRICE_TABLES),
+
+    supabase.from("tax_invoice_orders").select("tax_invoice_id, order_id"),
+    supabase.from("tax_invoices").select("id, invoice_number, issue_date"),
   ]);
 
   if (ordersResult.error) {
     throw new Error(ordersResult.error.message);
   }
 
-  const orders = ordersResult.data || [];
+  if (taxInvoiceOrdersResult.error) {
+    throw new Error(taxInvoiceOrdersResult.error.message);
+  }
+
+  if (taxInvoicesResult.error) {
+    throw new Error(taxInvoicesResult.error.message);
+  }
+
+  const taxInvoiceMap = new Map<string, TaxInvoiceInfo>();
+
+  (taxInvoicesResult.data || []).forEach((invoice: any) => {
+    const invoiceId = toStringId(invoice.id);
+
+    if (!invoiceId) return;
+
+    taxInvoiceMap.set(invoiceId, {
+      id: invoiceId,
+      invoiceNumber: String(invoice.invoice_number || ""),
+      issueDate: formatDate(invoice.issue_date),
+    });
+  });
+
+  const taxInvoiceByOrderIdMap = new Map<string, TaxInvoiceInfo>();
+
+  (taxInvoiceOrdersResult.data || []).forEach((link: any) => {
+    const orderId = toStringId(link.order_id);
+    const taxInvoiceId = toStringId(link.tax_invoice_id);
+    const taxInvoiceInfo = taxInvoiceMap.get(taxInvoiceId);
+
+    if (!orderId || !taxInvoiceInfo) return;
+
+    const existing = taxInvoiceByOrderIdMap.get(orderId);
+
+    if (
+      !existing ||
+      String(taxInvoiceInfo.issueDate).localeCompare(
+        String(existing.issueDate),
+      ) > 0
+    ) {
+      taxInvoiceByOrderIdMap.set(orderId, taxInvoiceInfo);
+    }
+  });
+
+  const orders = (ordersResult.data || []).map((order: any) => ({
+    ...order,
+    taxInvoiceInfo:
+      taxInvoiceByOrderIdMap.get(toStringId(order.id)) || null,
+  }));
 
   const regularOrders = orders.filter(
     (order: any) => getOrderType(order) === "order",
@@ -477,7 +575,7 @@ export default async function OrdersPage({
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1000px] border-collapse text-sm">
+          <table className="w-full min-w-[1120px] border-collapse text-sm">
             <thead>
               <tr className="border-b bg-gray-50">
                 <th className="px-4 py-3 text-left">
@@ -495,6 +593,7 @@ export default async function OrdersPage({
                   {activeTab === "sample" ? "금액" : "주문금액"}
                 </th>
                 <th className="px-4 py-3 text-left">상태</th>
+                <th className="px-4 py-3 text-left">세금계산서</th>
                 <th className="px-4 py-3 text-left">메모</th>
                 <th className="px-4 py-3 text-center">관리</th>
               </tr>
@@ -504,7 +603,7 @@ export default async function OrdersPage({
               {displayedOrders.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={9}
+                    colSpan={10}
                     className="px-4 py-12 text-center text-gray-500"
                   >
                     {activeTab === "sample"
@@ -527,9 +626,7 @@ export default async function OrdersPage({
                     </td>
 
                     <td className="px-4 py-3">
-                      {order.partner_name ||
-                        order.recipient_name ||
-                        "-"}
+                      {order.partner_name || order.recipient_name || "-"}
                     </td>
 
                     <td className="px-4 py-3">
@@ -537,10 +634,7 @@ export default async function OrdersPage({
                     </td>
 
                     <td className="whitespace-nowrap px-4 py-3 text-right">
-                      {Number(
-                        order.total_quantity || 0,
-                      ).toLocaleString()}
-                      개
+                      {Number(order.total_quantity || 0).toLocaleString()}개
                     </td>
 
                     <td className="whitespace-nowrap px-4 py-3 text-right font-semibold">
@@ -560,6 +654,10 @@ export default async function OrdersPage({
                             ? "샘플출고"
                             : "주문완료")}
                       </span>
+                    </td>
+
+                    <td className="px-4 py-3">
+                      <TaxInvoiceStatus order={order} />
                     </td>
 
                     <td className="max-w-[240px] truncate px-4 py-3 text-gray-500">

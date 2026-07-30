@@ -16,6 +16,12 @@ type OrderItem = {
   amount?: number | string | null;
 };
 
+type TaxInvoiceInfo = {
+  id: string;
+  invoiceNumber: string;
+  issueDate: string;
+};
+
 type Order = {
   id: string;
   order_type?: string | null;
@@ -30,6 +36,7 @@ type Order = {
   memo?: string | null;
   created_at?: string | null;
   order_items?: OrderItem[];
+  taxInvoiceInfo?: TaxInvoiceInfo | null;
 };
 
 type OrderDetailModalProps = {
@@ -97,6 +104,54 @@ function getPriceTypeLabel(priceType: string | null | undefined) {
   return labels[key] || key || "-";
 }
 
+function TaxInvoiceStatusCard({ order }: { order: Order }) {
+  const isSample = order.order_type === "sample";
+  const taxInvoiceInfo = order.taxInvoiceInfo;
+
+  if (isSample) {
+    return (
+      <div className="rounded-xl border bg-gray-50 p-4">
+        <p className="text-sm text-gray-500">세금계산서</p>
+        <span className="mt-2 inline-flex rounded-full bg-gray-200 px-2.5 py-1 text-xs font-semibold text-gray-600">
+          해당없음
+        </span>
+      </div>
+    );
+  }
+
+  if (!taxInvoiceInfo) {
+    return (
+      <div className="rounded-xl border border-rose-100 bg-rose-50 p-4">
+        <p className="text-sm text-rose-600">세금계산서</p>
+        <span className="mt-2 inline-flex rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-rose-700 ring-1 ring-rose-200">
+          미발행
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
+      <p className="text-sm text-emerald-700">세금계산서</p>
+
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span className="inline-flex rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
+          발행
+        </span>
+        <span className="text-sm font-semibold text-gray-900">
+          {taxInvoiceInfo.invoiceNumber || "번호 없음"}
+        </span>
+      </div>
+
+      {taxInvoiceInfo.issueDate ? (
+        <p className="mt-2 text-xs text-gray-500">
+          발행일 {taxInvoiceInfo.issueDate}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export default function OrderDetailModal({ order }: OrderDetailModalProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -108,7 +163,7 @@ export default function OrderDetailModal({ order }: OrderDetailModalProps) {
     const confirmed = window.confirm(
       `주문번호 ${
         order.order_number || ""
-      } 주문을 삭제하시겠습니까?\n삭제 후 복구할 수 없습니다.`
+      } 주문을 삭제하시겠습니까?\n삭제 후 복구할 수 없습니다.`,
     );
 
     if (!confirmed) return;
@@ -161,7 +216,7 @@ export default function OrderDetailModal({ order }: OrderDetailModalProps) {
               </button>
             </div>
 
-            <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-5">
+            <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-6">
               <div className="rounded-xl border bg-gray-50 p-4">
                 <p className="text-sm text-gray-500">주문 구분</p>
                 <p className="mt-1 font-semibold">
@@ -194,6 +249,8 @@ export default function OrderDetailModal({ order }: OrderDetailModalProps) {
                 <p className="text-sm text-gray-500">상태</p>
                 <p className="mt-1 font-semibold">{order.status || "-"}</p>
               </div>
+
+              <TaxInvoiceStatusCard order={order} />
             </div>
 
             <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2">
