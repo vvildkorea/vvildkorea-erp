@@ -8,7 +8,11 @@ import {
   deleteProductVariant,
   setProductModelActive,
   setProductVariantActive,
+  updateProductModel,
+  updateProductModelVariantPrices,
+  updateProductVariant,
   type ProductCategory,
+  type ProductVariantPriceInput,
 } from "@/lib/products";
 import { syncCurrentOperator } from "@/lib/operators";
 
@@ -45,6 +49,22 @@ function getNumberValue(formData: FormData, key: string) {
   return numberValue;
 }
 
+function getOptionalNumberValue(formData: FormData, key: string) {
+  const value = getStringValue(formData, key);
+
+  if (!value) {
+    return undefined;
+  }
+
+  const numberValue = Number(value.replaceAll(",", ""));
+
+  if (Number.isNaN(numberValue)) {
+    throw new Error(`${key} 값이 올바르지 않습니다.`);
+  }
+
+  return numberValue;
+}
+
 function getCategory(formData: FormData) {
   const value = getStringValue(formData, "category");
 
@@ -53,14 +73,46 @@ function getCategory(formData: FormData) {
     : "disposable";
 }
 
-function getPriceValues(formData: FormData) {
+function getPriceValues(formData: FormData): ProductVariantPriceInput {
   return {
-    headquarters: null, // 도착원가는 수입 건에서 자동 계산
+    headquarters: null,
     wholesale: getNumberValue(formData, "price_wholesale"),
     retail: getNumberValue(formData, "price_retail"),
     direct_store: getNumberValue(formData, "price_direct_store"),
     etc: getNumberValue(formData, "price_etc"),
   };
+}
+
+function getEditablePriceValues(
+  formData: FormData,
+): ProductVariantPriceInput {
+  return {
+    wholesale: getNumberValue(formData, "price_wholesale"),
+    retail: getNumberValue(formData, "price_retail"),
+    direct_store: getNumberValue(formData, "price_direct_store"),
+    etc: getNumberValue(formData, "price_etc"),
+  };
+}
+
+function getOptionalModelPriceValues(
+  formData: FormData,
+): ProductVariantPriceInput {
+  const prices: ProductVariantPriceInput = {};
+
+  const wholesale = getOptionalNumberValue(formData, "price_wholesale");
+  const retail = getOptionalNumberValue(formData, "price_retail");
+  const directStore = getOptionalNumberValue(
+    formData,
+    "price_direct_store",
+  );
+  const etc = getOptionalNumberValue(formData, "price_etc");
+
+  if (wholesale !== undefined) prices.wholesale = wholesale;
+  if (retail !== undefined) prices.retail = retail;
+  if (directStore !== undefined) prices.direct_store = directStore;
+  if (etc !== undefined) prices.etc = etc;
+
+  return prices;
 }
 
 export async function createProductModelAction(formData: FormData) {
@@ -92,6 +144,50 @@ export async function createProductModelAction(formData: FormData) {
   revalidatePath("/products");
 }
 
+export async function updateProductModelAction(formData: FormData) {
+  const currentOperator = await syncCurrentOperator();
+
+  if (!currentOperator) {
+    throw new Error("로그인이 필요합니다.");
+  }
+
+  const id = getStringValue(formData, "id");
+  const modelName = getStringValue(formData, "model_name");
+
+  if (!id) {
+    throw new Error("제품 모델 ID가 없습니다.");
+  }
+
+  if (!modelName) {
+    throw new Error("모델명은 필수입니다.");
+  }
+
+  await updateProductModel({
+    id,
+    category: getCategory(formData),
+    model_name: modelName,
+    brand: getStringValue(formData, "brand"),
+    english_name: getStringValue(formData, "english_name"),
+    origin_country: getStringValue(formData, "origin_country"),
+    specification: getStringValue(formData, "specification"),
+    unit: getStringValue(formData, "unit") || "ea",
+    hs_code: getStringValue(formData, "hs_code"),
+    memo: getStringValue(formData, "memo"),
+  });
+
+  const modelPrices = getOptionalModelPriceValues(formData);
+
+  if (Object.keys(modelPrices).length > 0) {
+    await updateProductModelVariantPrices({
+      product_model_id: id,
+      prices: modelPrices,
+    });
+  }
+
+  revalidatePath("/products");
+  revalidatePath("/orders");
+}
+
 export async function createProductVariantAction(formData: FormData) {
   await syncCurrentOperator();
 
@@ -114,6 +210,44 @@ export async function createProductVariantAction(formData: FormData) {
   });
 
   revalidatePath("/products");
+}
+
+export async function updateProductVariantAction(formData: FormData) {
+  const currentOperator = await syncCurrentOperator();
+
+  if (!currentOperator) {
+    throw new Error("로그인이 필요합니다.");
+  }
+
+  const id = getStringValue(formData, "id");
+  const category = getCategory(formData);
+  const optionName = getStringValue(formData, "option_name");
+
+  if (!id) {
+    throw new Error("제품 옵션 ID가 없습니다.");
+  }
+
+  if (!optionName) {
+    throw new Error(category === "device" ? "색상명은 필수입니다." : "맛 이름은 필수입니다.");
+  }
+
+  await updateProductVariant({
+    id,
+    sku: getStringValue(formData, "sku"),
+    flavor: category === "device" ? "" : optionName,
+    color: category === "device" ? optionName : "",
+    nicotine_content:
+      category === "device"
+        ? ""
+        : getStringValue(formData, "nicotine_content"),
+    barcode: getStringValue(formData, "barcode"),
+    box_quantity: getNumberValue(formData, "box_quantity"),
+    memo: getStringValue(formData, "variant_memo"),
+    prices: getEditablePriceValues(formData),
+  });
+
+  revalidatePath("/products");
+  revalidatePath("/orders");
 }
 
 export async function toggleProductModelActiveAction(formData: FormData) {
@@ -209,26 +343,23 @@ export async function createProductWithVariantsAction(formData: FormData) {
   const sharedPrices = getPriceValues(formData);
 
   for (let index = 0; index < optionNames.length; index += 1) {
-  const rawOptionName = optionNames[index];
+    const rawOptionName = optionNames[index];
 
-  const optionName =
-    typeof rawOptionName === "string" ? rawOptionName.trim() : "";
+    const optionName =
+      typeof rawOptionName === "string" ? rawOptionName.trim() : "";
 
-  if (!optionName) {
-    continue;
+    if (!optionName) {
+      continue;
+    }
+
+    await createProductVariant({
+      product_model_id: model.id,
+      flavor: category === "device" ? "" : optionName,
+      color: category === "device" ? optionName : "",
+      nicotine_content: sharedNicotineContent,
+      prices: sharedPrices,
+    });
   }
-
-  await createProductVariant({
-    product_model_id: model.id,
-
-    flavor: category === "device" ? "" : optionName,
-    color: category === "device" ? optionName : "",
-
-    nicotine_content: sharedNicotineContent,
-
-    prices: sharedPrices,
-  });
-}
 
   revalidatePath("/products");
 }

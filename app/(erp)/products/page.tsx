@@ -8,6 +8,8 @@ import {
 } from "./product-delete-button";
 import { ProductModelCreateModal } from "./product-model-create-modal";
 import { ProductVariantCreateModal } from "./product-variant-create-modal";
+import { ProductModelEditModal } from "./product-model-edit-modal";
+import { ProductVariantEditModal } from "./product-variant-edit-modal";
 import {
   getProductModels,
   type PricePartnerType,
@@ -79,11 +81,11 @@ function getVariantName(variant: ProductVariant, category: ProductCategory) {
 
 function getVariantPrice(
   variant: ProductVariant,
-  partnerType: PricePartnerType
+  partnerType: PricePartnerType,
 ) {
   return (
     variant.product_variant_prices?.find(
-      (price) => price.partner_type === partnerType
+      (price) => price.partner_type === partnerType,
     )?.price ?? null
   );
 }
@@ -192,7 +194,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
 
             return (
               <div key={model.id} className="p-6">
-                <div className="grid gap-4 md:grid-cols-[120px_1fr_260px] md:items-start">
+                <div className="grid gap-4 md:grid-cols-[120px_1fr_360px] md:items-start">
                   <div>
                     <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
                       {categoryLabels[model.category]}
@@ -223,6 +225,8 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                   </div>
 
                   <div className="flex flex-wrap gap-2 md:justify-end">
+                    <ProductModelEditModal model={model} />
+
                     <ProductVariantCreateModal
                       productModelId={model.id}
                       category={model.category}
@@ -262,7 +266,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                     <div className="divide-y divide-slate-100">
                       {variants.map((variant) => (
                         <div key={variant.id} className="p-4">
-                          <div className="grid gap-4 md:grid-cols-[1fr_360px_180px] md:items-center">
+                          <div className="grid gap-4 md:grid-cols-[1fr_360px_260px] md:items-center">
                             <div>
                               <p className="font-semibold text-slate-900">
                                 {getVariantName(variant, model.category)}
@@ -275,8 +279,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                                   박스입수: {variant.box_quantity || "-"}
                                 </span>
                                 <span>
-                                  상태:{" "}
-                                  {variant.is_active ? "사용중" : "중지"}
+                                  상태: {variant.is_active ? "사용중" : "중지"}
                                 </span>
                               </div>
                             </div>
@@ -294,13 +297,19 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                                 <p key={partnerType}>
                                   {priceLabels[partnerType]}:{" "}
                                   {formatNumber(
-                                    getVariantPrice(variant, partnerType)
+                                    getVariantPrice(variant, partnerType),
                                   )}
                                 </p>
                               ))}
                             </div>
 
-                            <div className="flex gap-2 md:justify-end">
+                            <div className="flex flex-wrap gap-2 md:justify-end">
+                              <ProductVariantEditModal
+                                variant={variant}
+                                category={model.category}
+                                modelName={model.model_name}
+                              />
+
                               <form action={toggleProductVariantActiveAction}>
                                 <input
                                   type="hidden"
@@ -310,9 +319,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                                 <input
                                   type="hidden"
                                   name="next_is_active"
-                                  value={
-                                    variant.is_active ? "false" : "true"
-                                  }
+                                  value={variant.is_active ? "false" : "true"}
                                 />
                                 <button
                                   type="submit"
@@ -326,7 +333,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                                 productVariantId={variant.id}
                                 variantName={getVariantName(
                                   variant,
-                                  model.category
+                                  model.category,
                                 )}
                               />
                             </div>

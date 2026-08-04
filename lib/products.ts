@@ -82,7 +82,7 @@ export async function getProductModels(filters?: ProductModelFilters) {
 
   if (filters?.q) {
     query = query.or(
-      `model_name.ilike.%${filters.q}%,brand.ilike.%${filters.q}%,english_name.ilike.%${filters.q}%`
+      `model_name.ilike.%${filters.q}%,brand.ilike.%${filters.q}%,english_name.ilike.%${filters.q}%`,
     );
   }
 
@@ -143,16 +143,120 @@ export async function createProductModel(input: {
   return data as ProductModel;
 }
 
+export async function updateProductModel(input: {
+  id: string;
+  category: ProductCategory;
+  model_name: string;
+  brand?: string;
+  english_name?: string;
+  origin_country?: string;
+  specification?: string;
+  unit?: string;
+  hs_code?: string;
+  memo?: string;
+}) {
+  const { data, error } = await supabaseAdmin
+    .from("product_models")
+    .update({
+      category: input.category,
+      model_name: input.model_name,
+      brand: input.brand || null,
+      english_name: input.english_name || null,
+      origin_country: input.origin_country || null,
+      specification: input.specification || null,
+      unit: input.unit || "ea",
+      hs_code: input.hs_code || null,
+      memo: input.memo || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.id)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as ProductModel;
+}
+
 async function upsertVariantPrices(
   productVariantId: string,
-  prices: ProductVariantPriceInput
+  prices: ProductVariantPriceInput,
+  options?: {
+    includeMissing?: boolean;
+  },
 ) {
-  const rows = pricePartnerTypes.map((partnerType) => ({
-    product_variant_id: productVariantId,
-    partner_type: partnerType,
-    price: prices[partnerType] ?? null,
-    updated_at: new Date().toISOString(),
-  }));
+  const includeMissing = options?.includeMissing === true;
+
+  const rows = pricePartnerTypes
+    .filter((partnerType) => {
+      return (
+        includeMissing ||
+        Object.prototype.hasOwnProperty.call(prices, partnerType)
+      );
+    })
+    .map((partnerType) => ({
+      product_variant_id: productVariantId,
+      partner_type: partnerType,
+      price: prices[partnerType] ?? null,
+      updated_at: new Date().toISOString(),
+    }));
+
+  if (rows.length === 0) {
+    return;
+  }
+
+  const { error } = await supabaseAdmin
+    .from("product_variant_prices")
+    .upsert(rows, {
+      onConflict: "product_variant_id,partner_type",
+    });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function updateProductModelVariantPrices(input: {
+  product_model_id: string;
+  prices: ProductVariantPriceInput;
+}) {
+  const providedPartnerTypes = pricePartnerTypes.filter((partnerType) => {
+    return Object.prototype.hasOwnProperty.call(input.prices, partnerType);
+  });
+
+  if (providedPartnerTypes.length === 0) {
+    return;
+  }
+
+  const { data: variants, error: variantsError } = await supabaseAdmin
+    .from("product_variants")
+    .select("id")
+    .eq("product_model_id", input.product_model_id);
+
+  if (variantsError) {
+    throw new Error(variantsError.message);
+  }
+
+  const variantIds = (variants || [])
+    .map((variant) => String(variant.id || ""))
+    .filter(Boolean);
+
+  if (variantIds.length === 0) {
+    return;
+  }
+
+  const updatedAt = new Date().toISOString();
+
+  const rows = variantIds.flatMap((productVariantId) => {
+    return providedPartnerTypes.map((partnerType) => ({
+      product_variant_id: productVariantId,
+      partner_type: partnerType,
+      price: input.prices[partnerType] ?? null,
+      updated_at: updatedAt,
+    }));
+  });
 
   const { error } = await supabaseAdmin
     .from("product_variant_prices")
@@ -195,7 +299,47 @@ export async function createProductVariant(input: {
     throw new Error(error.message);
   }
 
-  await upsertVariantPrices(data.id, input.prices);
+  await upsertVariantPrices(data.id, input.prices, {
+    includeMissing: true,
+  });
+
+  return data as ProductVariant;
+}
+
+export async function updateProductVariant(input: {
+  id: string;
+  sku?: string;
+  flavor?: string;
+  color?: string;
+  nicotine_content?: string;
+  barcode?: string;
+  box_quantity?: number | null;
+  memo?: string;
+  prices?: ProductVariantPriceInput;
+}) {
+  const { data, error } = await supabaseAdmin
+    .from("product_variants")
+    .update({
+      sku: input.sku || null,
+      flavor: input.flavor || null,
+      color: input.color || null,
+      nicotine_content: input.nicotine_content || null,
+      barcode: input.barcode || null,
+      box_quantity: input.box_quantity ?? null,
+      memo: input.memo || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.id)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (input.prices) {
+    await upsertVariantPrices(input.id, input.prices);
+  }
 
   return data as ProductVariant;
 }
