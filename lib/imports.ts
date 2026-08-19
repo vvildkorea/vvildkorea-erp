@@ -22,6 +22,10 @@ export type ImportOrderInput = {
   items: ImportOrderItemInput[];
 };
 
+export type ImportOrderUpdateInput = ImportOrderInput & {
+  id: string;
+};
+
 export type ImportOrderItem = {
   id: string;
   import_order_id: string;
@@ -61,6 +65,15 @@ export type ImportOrder = {
   import_order_items?: ImportOrderItem[];
 };
 
+type PreparedImportOrder = {
+  validItems: ImportOrderItemInput[];
+  productCostTotal: number;
+  extraCostTotal: number;
+  totalCost: number;
+  itemProductCostSum: number;
+  totalQuantity: number;
+};
+
 export async function getImportOrders() {
   const { data, error } = await supabaseAdmin
     .from("import_orders")
@@ -76,7 +89,7 @@ export async function getImportOrders() {
         ),
         product_variants(*)
       )
-    `
+    `,
     )
     .order("created_at", { ascending: false });
 
@@ -89,7 +102,7 @@ export async function getImportOrders() {
 
 export async function updateVariantLandedCost(input: {
   product_variant_id: string;
-  landed_cost_unit: number;
+  landed_cost_unit: number | null;
 }) {
   const { data: existingRows, error: selectError } = await supabaseAdmin
     .from("product_variant_prices")
@@ -134,13 +147,13 @@ export async function updateVariantLandedCost(input: {
   }
 }
 
-export async function createImportOrder(input: ImportOrderInput) {
+function prepareImportOrder(input: ImportOrderInput): PreparedImportOrder {
   const validItems = input.items.filter(
     (item) =>
       item.product_model_id &&
       item.product_variant_id &&
       Number(item.quantity) > 0 &&
-      Number(item.product_cost) >= 0
+      Number(item.product_cost) >= 0,
   );
 
   if (validItems.length === 0) {
@@ -149,7 +162,7 @@ export async function createImportOrder(input: ImportOrderInput) {
 
   const calculatedProductCostTotal = validItems.reduce(
     (sum, item) => sum + Number(item.product_cost || 0),
-    0
+    0,
   );
 
   const productCostTotal =
@@ -168,13 +181,128 @@ export async function createImportOrder(input: ImportOrderInput) {
 
   const itemProductCostSum = validItems.reduce(
     (sum, item) => sum + Number(item.product_cost || 0),
-    0
+    0,
   );
 
   const totalQuantity = validItems.reduce(
     (sum, item) => sum + Number(item.quantity || 0),
-    0
+    0,
   );
+
+  return {
+    validItems,
+    productCostTotal,
+    extraCostTotal,
+    totalCost,
+    itemProductCostSum,
+    totalQuantity,
+  };
+}
+
+function calculateImportItem(input: {
+  item: ImportOrderItemInput;
+  productCostTotal: number;
+  extraCostTotal: number;
+  itemProductCostSum: number;
+  totalQuantity: number;
+}) {
+  const {
+    item,
+    productCostTotal,
+    extraCostTotal,
+    itemProductCostSum,
+    totalQuantity,
+  } = input;
+
+  let allocationRatio = 0;
+
+  if (itemProductCostSum > 0) {
+    allocationRatio = Number(item.product_cost || 0) / itemProductCostSum;
+  } else if (totalQuantity > 0) {
+    allocationRatio = Number(item.quantity || 0) / totalQuantity;
+  }
+
+  const allocatedProductCost = productCostTotal * allocationRatio;
+  const allocatedExtraCost = extraCostTotal * allocationRatio;
+  const landedCostTotal = allocatedProductCost + allocatedExtraCost;
+  const landedCostUnit =
+    item.quantity > 0 ? landedCostTotal / item.quantity : 0;
+
+  return {
+    allocatedProductCost: Math.round(allocatedProductCost),
+    allocatedExtraCost: Math.round(allocatedExtraCost),
+    landedCostTotal: Math.round(landedCostTotal),
+    landedCostUnit: Math.round(landedCostUnit),
+  };
+}
+
+async function refreshVariantLandedCost(productVariantId: string) {
+  const { data: itemRows, error: itemError } = await supabaseAdmin
+    .from("import_order_items")
+    .select("id, import_order_id, landed_cost_unit, created_at")
+    .eq("product_variant_id", productVariantId);
+
+  if (itemError) {
+    throw new Error(itemError.message);
+  }
+
+  if (!itemRows || itemRows.length === 0) {
+    await updateVariantLandedCost({
+      product_variant_id: productVariantId,
+      landed_cost_unit: null,
+    });
+    return;
+  }
+
+  const importOrderIds = Array.from(
+    new Set(itemRows.map((row) => String(row.import_order_id)).filter(Boolean)),
+  );
+
+  const { data: orderRows, error: orderError } = await supabaseAdmin
+    .from("import_orders")
+    .select("id, import_date, created_at")
+    .in("id", importOrderIds);
+
+  if (orderError) {
+    throw new Error(orderError.message);
+  }
+
+  const orderDateMap = new Map<string, { importDate: string; createdAt: string }>();
+
+  (orderRows || []).forEach((row) => {
+    orderDateMap.set(String(row.id), {
+      importDate: String(row.import_date || ""),
+      createdAt: String(row.created_at || ""),
+    });
+  });
+
+  const sortedItems = [...itemRows].sort((a, b) => {
+    const aOrder = orderDateMap.get(String(a.import_order_id));
+    const bOrder = orderDateMap.get(String(b.import_order_id));
+
+    const aDate = aOrder?.importDate || aOrder?.createdAt || String(a.created_at || "");
+    const bDate = bOrder?.importDate || bOrder?.createdAt || String(b.created_at || "");
+
+    if (aDate !== bDate) {
+      return bDate.localeCompare(aDate);
+    }
+
+    const aCreatedAt = aOrder?.createdAt || String(a.created_at || "");
+    const bCreatedAt = bOrder?.createdAt || String(b.created_at || "");
+
+    return bCreatedAt.localeCompare(aCreatedAt);
+  });
+
+  const latestItem = sortedItems[0];
+
+  await updateVariantLandedCost({
+    product_variant_id: productVariantId,
+    landed_cost_unit: Number(latestItem?.landed_cost_unit || 0),
+  });
+}
+
+export async function createImportOrder(input: ImportOrderInput) {
+  const prepared = prepareImportOrder(input);
 
   const { data: importOrder, error: importOrderError } = await supabaseAdmin
     .from("import_orders")
@@ -182,15 +310,13 @@ export async function createImportOrder(input: ImportOrderInput) {
       po_number: input.po_number,
       supplier_name: input.supplier_name || null,
       import_date: input.import_date || null,
-
-      product_cost_total: productCostTotal,
+      product_cost_total: prepared.productCostTotal,
       duty_amount: input.duty_amount,
       vat_amount: input.vat_amount,
       freight_amount: input.freight_amount,
       customs_broker_fee: input.customs_broker_fee,
       tobacco_tax_amount: input.tobacco_tax_amount,
-      total_cost: totalCost,
-
+      total_cost: prepared.totalCost,
       memo: input.memo || null,
       created_by_operator_id: input.created_by_operator_id || null,
     })
@@ -201,25 +327,16 @@ export async function createImportOrder(input: ImportOrderInput) {
     throw new Error(importOrderError.message);
   }
 
-  for (const item of validItems) {
-    let allocationRatio = 0;
+  const affectedVariantIds = new Set<string>();
 
-    if (itemProductCostSum > 0) {
-      allocationRatio = Number(item.product_cost || 0) / itemProductCostSum;
-    } else if (totalQuantity > 0) {
-      allocationRatio = Number(item.quantity || 0) / totalQuantity;
-    }
-
-    const allocatedProductCost = productCostTotal * allocationRatio;
-    const allocatedExtraCost = extraCostTotal * allocationRatio;
-    const landedCostTotal = allocatedProductCost + allocatedExtraCost;
-    const landedCostUnit =
-      item.quantity > 0 ? landedCostTotal / item.quantity : 0;
-
-    const roundedAllocatedProductCost = Math.round(allocatedProductCost);
-    const roundedAllocatedExtraCost = Math.round(allocatedExtraCost);
-    const roundedLandedCostTotal = Math.round(landedCostTotal);
-    const roundedLandedCostUnit = Math.round(landedCostUnit);
+  for (const item of prepared.validItems) {
+    const calculated = calculateImportItem({
+      item,
+      productCostTotal: prepared.productCostTotal,
+      extraCostTotal: prepared.extraCostTotal,
+      itemProductCostSum: prepared.itemProductCostSum,
+      totalQuantity: prepared.totalQuantity,
+    });
 
     const { data: savedItem, error: itemError } = await supabaseAdmin
       .from("import_order_items")
@@ -227,13 +344,11 @@ export async function createImportOrder(input: ImportOrderInput) {
         import_order_id: importOrder.id,
         product_model_id: item.product_model_id,
         product_variant_id: item.product_variant_id,
-
         quantity: item.quantity,
-        product_cost: roundedAllocatedProductCost,
-
-        allocated_extra_cost: roundedAllocatedExtraCost,
-        landed_cost_total: roundedLandedCostTotal,
-        landed_cost_unit: roundedLandedCostUnit,
+        product_cost: calculated.allocatedProductCost,
+        allocated_extra_cost: calculated.allocatedExtraCost,
+        landed_cost_total: calculated.landedCostTotal,
+        landed_cost_unit: calculated.landedCostUnit,
       })
       .select("id")
       .single();
@@ -242,10 +357,7 @@ export async function createImportOrder(input: ImportOrderInput) {
       throw new Error(itemError.message);
     }
 
-    await updateVariantLandedCost({
-      product_variant_id: item.product_variant_id,
-      landed_cost_unit: roundedLandedCostUnit,
-    });
+    affectedVariantIds.add(item.product_variant_id);
 
     const { error: inventoryError } = await supabaseAdmin
       .from("inventory_movements")
@@ -263,5 +375,128 @@ export async function createImportOrder(input: ImportOrderInput) {
     }
   }
 
+  for (const variantId of affectedVariantIds) {
+    await refreshVariantLandedCost(variantId);
+  }
+
   return importOrder as ImportOrder;
+}
+
+export async function updateImportOrder(input: ImportOrderUpdateInput) {
+  if (!input.id) {
+    throw new Error("수정할 수입 건 ID가 없습니다.");
+  }
+
+  const prepared = prepareImportOrder(input);
+
+  const { data: existingItems, error: existingItemsError } = await supabaseAdmin
+    .from("import_order_items")
+    .select("id, product_variant_id")
+    .eq("import_order_id", input.id);
+
+  if (existingItemsError) {
+    throw new Error(existingItemsError.message);
+  }
+
+  const affectedVariantIds = new Set<string>();
+
+  (existingItems || []).forEach((item) => {
+    if (item.product_variant_id) {
+      affectedVariantIds.add(String(item.product_variant_id));
+    }
+  });
+
+  const { data: updatedOrder, error: orderUpdateError } = await supabaseAdmin
+    .from("import_orders")
+    .update({
+      po_number: input.po_number,
+      supplier_name: input.supplier_name || null,
+      import_date: input.import_date || null,
+      product_cost_total: prepared.productCostTotal,
+      duty_amount: input.duty_amount,
+      vat_amount: input.vat_amount,
+      freight_amount: input.freight_amount,
+      customs_broker_fee: input.customs_broker_fee,
+      tobacco_tax_amount: input.tobacco_tax_amount,
+      total_cost: prepared.totalCost,
+      memo: input.memo || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.id)
+    .select("*")
+    .single();
+
+  if (orderUpdateError) {
+    throw new Error(orderUpdateError.message);
+  }
+
+  const { error: inventoryDeleteError } = await supabaseAdmin
+    .from("inventory_movements")
+    .delete()
+    .eq("import_order_id", input.id);
+
+  if (inventoryDeleteError) {
+    throw new Error(inventoryDeleteError.message);
+  }
+
+  const { error: itemsDeleteError } = await supabaseAdmin
+    .from("import_order_items")
+    .delete()
+    .eq("import_order_id", input.id);
+
+  if (itemsDeleteError) {
+    throw new Error(itemsDeleteError.message);
+  }
+
+  for (const item of prepared.validItems) {
+    const calculated = calculateImportItem({
+      item,
+      productCostTotal: prepared.productCostTotal,
+      extraCostTotal: prepared.extraCostTotal,
+      itemProductCostSum: prepared.itemProductCostSum,
+      totalQuantity: prepared.totalQuantity,
+    });
+
+    const { data: savedItem, error: itemError } = await supabaseAdmin
+      .from("import_order_items")
+      .insert({
+        import_order_id: input.id,
+        product_model_id: item.product_model_id,
+        product_variant_id: item.product_variant_id,
+        quantity: item.quantity,
+        product_cost: calculated.allocatedProductCost,
+        allocated_extra_cost: calculated.allocatedExtraCost,
+        landed_cost_total: calculated.landedCostTotal,
+        landed_cost_unit: calculated.landedCostUnit,
+      })
+      .select("id")
+      .single();
+
+    if (itemError) {
+      throw new Error(itemError.message);
+    }
+
+    affectedVariantIds.add(item.product_variant_id);
+
+    const { error: inventoryError } = await supabaseAdmin
+      .from("inventory_movements")
+      .insert({
+        product_variant_id: item.product_variant_id,
+        import_order_id: input.id,
+        import_order_item_id: savedItem.id,
+        movement_type: "in",
+        quantity: item.quantity,
+        memo: `${input.po_number} 수입 입고`,
+      });
+
+    if (inventoryError) {
+      throw new Error(inventoryError.message);
+    }
+  }
+
+  for (const variantId of affectedVariantIds) {
+    await refreshVariantLandedCost(variantId);
+  }
+
+  return updatedOrder as ImportOrder;
 }

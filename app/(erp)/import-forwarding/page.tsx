@@ -1,4 +1,5 @@
 import { ImportOrderCreateModal } from "./import-order-create-modal";
+import { ImportOrderEditModal } from "./import-order-edit-modal";
 import { ImportOrderDeleteButton } from "./import-order-delete-button";
 import { getImportOrders } from "@/lib/imports";
 import { getProductModels, type ProductCategory } from "@/lib/products";
@@ -62,7 +63,7 @@ export default async function ImportForwardingPage() {
   const productVariantOptions = productVariants.map((variant) => ({
     id: String(variant.id),
     product_model_id: String(
-      variant.product_model_id || variant.model_id || variant.product_id || ""
+      variant.product_model_id || variant.model_id || variant.product_id || "",
     ),
     option_name: getVariantLabel(variant),
   }));
@@ -119,10 +120,18 @@ export default async function ImportForwardingPage() {
                         )}
                       </div>
 
-                      <ImportOrderDeleteButton
-                        importOrderId={order.id}
-                        poNumber={order.po_number}
-                      />
+                      <div className="flex flex-wrap gap-2">
+                        <ImportOrderEditModal
+                          order={order}
+                          productModels={productModelOptions}
+                          productVariants={productVariantOptions}
+                        />
+
+                        <ImportOrderDeleteButton
+                          importOrderId={order.id}
+                          poNumber={order.po_number}
+                        />
+                      </div>
                     </div>
                   </div>
 
