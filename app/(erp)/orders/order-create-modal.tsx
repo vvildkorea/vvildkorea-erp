@@ -82,6 +82,7 @@ type OrderItemState = {
   priceType: string;
   unitPrice: number;
   quantity: number;
+  selected: boolean;
 };
 
 type OrderCreateModalProps = {
@@ -365,6 +366,7 @@ export default function OrderCreateModal({
   });
   const [memo, setMemo] = useState("");
   const [bulkQuantity, setBulkQuantity] = useState(1);
+  const [bulkUnitPrice, setBulkUnitPrice] = useState("");
 
   const [items, setItems] = useState<OrderItemState[]>([
     {
@@ -373,6 +375,7 @@ export default function OrderCreateModal({
       priceType: "",
       unitPrice: 0,
       quantity: 1,
+      selected: false,
     },
   ]);
 
@@ -409,6 +412,13 @@ export default function OrderCreateModal({
     }, 0);
   }, [items]);
 
+  const selectedItemCount = useMemo(() => {
+    return items.filter((item) => item.selected).length;
+  }, [items]);
+
+  const allItemsSelected =
+    items.length > 0 && items.every((item) => item.selected);
+
   function resetForm() {
     setOrderType("order");
     setSampleTargetType("partner");
@@ -417,6 +427,7 @@ export default function OrderCreateModal({
     setOrderDate(new Date().toISOString().slice(0, 10));
     setMemo("");
     setBulkQuantity(1);
+    setBulkUnitPrice("");
     setItems([
       {
         productModelId: "",
@@ -424,6 +435,7 @@ export default function OrderCreateModal({
         priceType: "",
         unitPrice: 0,
         quantity: 1,
+        selected: false,
       },
     ]);
   }
@@ -458,6 +470,10 @@ export default function OrderCreateModal({
           : "";
 
     recalculateItems(value, nextPriceType);
+
+    if (value === "sample") {
+      setBulkUnitPrice("");
+    }
   }
 
   function handlePartnerChange(value: string) {
@@ -534,6 +550,21 @@ export default function OrderCreateModal({
     );
   }
 
+  function handleUnitPriceChange(index: number, unitPrice: number) {
+    if (orderType === "sample") return;
+
+    setItems((prev) =>
+      prev.map((item, itemIndex) => {
+        if (itemIndex !== index) return item;
+
+        return {
+          ...item,
+          unitPrice: Math.max(0, unitPrice),
+        };
+      })
+    );
+  }
+
   function handleQuantityChange(index: number, quantity: number) {
     setItems((prev) =>
       prev.map((item, itemIndex) => {
@@ -544,6 +575,30 @@ export default function OrderCreateModal({
           quantity,
         };
       })
+    );
+  }
+
+  function handleItemSelectedChange(index: number, selected: boolean) {
+    setItems((prev) =>
+      prev.map((item, itemIndex) => {
+        if (itemIndex !== index) return item;
+
+        return {
+          ...item,
+          selected,
+        };
+      })
+    );
+  }
+
+  function toggleSelectAllItems() {
+    const nextSelected = !allItemsSelected;
+
+    setItems((prev) =>
+      prev.map((item) => ({
+        ...item,
+        selected: nextSelected,
+      }))
     );
   }
 
@@ -563,6 +618,41 @@ export default function OrderCreateModal({
     );
   }
 
+  function applyBulkUnitPrice() {
+    if (orderType === "sample") {
+      alert("샘플 출고는 단가가 0원으로 저장됩니다.");
+      return;
+    }
+
+    if (selectedItemCount === 0) {
+      alert("단가를 변경할 품목을 체크해주세요.");
+      return;
+    }
+
+    if (bulkUnitPrice.trim() === "") {
+      alert("적용할 단가를 입력해주세요.");
+      return;
+    }
+
+    const unitPrice = Number(bulkUnitPrice);
+
+    if (Number.isNaN(unitPrice) || unitPrice < 0) {
+      alert("단가는 0원 이상의 숫자로 입력해주세요.");
+      return;
+    }
+
+    setItems((prev) =>
+      prev.map((item) =>
+        item.selected
+          ? {
+              ...item,
+              unitPrice,
+            }
+          : item
+      )
+    );
+  }
+
   function addItem() {
     setItems((prev) => [
       ...prev,
@@ -572,6 +662,7 @@ export default function OrderCreateModal({
         priceType: selectedPriceType,
         unitPrice: 0,
         quantity: bulkQuantity > 0 ? bulkQuantity : 1,
+        selected: false,
       },
     ]);
   }
@@ -804,9 +895,16 @@ export default function OrderCreateModal({
             )}
 
             <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-              <h3 className="font-semibold">주문 품목</h3>
+              <div>
+                <h3 className="font-semibold">주문 품목</h3>
+                {orderType === "order" && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    자동 적용된 단가는 품목별로 직접 수정할 수 있습니다.
+                  </p>
+                )}
+              </div>
 
-              <div className="flex items-end gap-2">
+              <div className="flex flex-wrap items-end gap-2">
                 <div>
                   <label className="mb-1 block text-sm font-medium">
                     전체 동일 수량
@@ -818,7 +916,7 @@ export default function OrderCreateModal({
                     onChange={(event) =>
                       setBulkQuantity(Number(event.target.value || 0))
                     }
-                    className="w-32 rounded-lg border px-3 py-2 text-right text-sm"
+                    className="w-28 rounded-lg border px-3 py-2 text-right text-sm"
                   />
                 </div>
 
@@ -828,6 +926,31 @@ export default function OrderCreateModal({
                   className="rounded-lg border px-3 py-2 text-sm"
                 >
                   전체 적용
+                </button>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium">
+                    선택 단가
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={bulkUnitPrice}
+                    onChange={(event) => setBulkUnitPrice(event.target.value)}
+                    disabled={orderType === "sample"}
+                    placeholder="단가"
+                    className="w-28 rounded-lg border px-3 py-2 text-right text-sm disabled:bg-gray-100"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={applyBulkUnitPrice}
+                  disabled={orderType === "sample"}
+                  className="rounded-lg border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
+                >
+                  선택 적용
                 </button>
 
                 <button
@@ -841,9 +964,18 @@ export default function OrderCreateModal({
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[900px] border-collapse text-sm">
+              <table className="w-full min-w-[980px] border-collapse text-sm">
                 <thead>
                   <tr className="border-y bg-gray-50">
+                    <th className="w-12 px-3 py-2 text-center">
+                      <input
+                        type="checkbox"
+                        checked={allItemsSelected}
+                        onChange={toggleSelectAllItems}
+                        aria-label="전체 품목 선택"
+                        className="h-4 w-4"
+                      />
+                    </th>
                     <th className="px-3 py-2 text-left">제품 모델</th>
                     <th className="px-3 py-2 text-left">맛/색상</th>
                     <th className="px-3 py-2 text-right">단가</th>
@@ -866,6 +998,21 @@ export default function OrderCreateModal({
 
                     return (
                       <tr key={index} className="border-b">
+                        <td className="px-3 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={item.selected}
+                            onChange={(event) =>
+                              handleItemSelectedChange(
+                                index,
+                                event.target.checked
+                              )
+                            }
+                            aria-label={`${index + 1}번째 품목 선택`}
+                            className="h-4 w-4"
+                          />
+                        </td>
+
                         <td className="px-3 py-2">
                           <select
                             value={item.productModelId}
@@ -908,9 +1055,18 @@ export default function OrderCreateModal({
 
                         <td className="px-3 py-2 text-right">
                           <input
-                            value={formatKrw(item.unitPrice)}
-                            readOnly
-                            className="w-full rounded-lg border bg-gray-50 px-3 py-2 text-right"
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={item.unitPrice}
+                            onChange={(event) =>
+                              handleUnitPriceChange(
+                                index,
+                                Number(event.target.value || 0)
+                              )
+                            }
+                            disabled={orderType === "sample"}
+                            className="w-full rounded-lg border px-3 py-2 text-right disabled:bg-gray-100"
                           />
                         </td>
 
@@ -948,6 +1104,12 @@ export default function OrderCreateModal({
                 </tbody>
               </table>
             </div>
+
+            {orderType === "order" && selectedItemCount > 0 && (
+              <p className="mt-2 text-right text-xs text-gray-500">
+                {selectedItemCount}개 품목이 선택되었습니다.
+              </p>
+            )}
 
             <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
               <div>
