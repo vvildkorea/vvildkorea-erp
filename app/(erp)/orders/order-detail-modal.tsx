@@ -4,9 +4,12 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { formatKrw } from "@/lib/orders";
 import { deleteOrder } from "./actions";
+import OrderEditModal from "./order-edit-modal";
 
 type OrderItem = {
   id: string;
+  product_model_id?: string | null;
+  product_variant_id?: string | null;
   product_category?: string | null;
   model_name?: string | null;
   option_name?: string | null;
@@ -26,6 +29,7 @@ type Order = {
   id: string;
   order_type?: string | null;
   order_number?: string | null;
+  partner_id?: string | null;
   partner_name?: string | null;
   partner_type?: string | null;
   recipient_name?: string | null;
@@ -41,6 +45,8 @@ type Order = {
 
 type OrderDetailModalProps = {
   order: Order;
+  partners: any[];
+  products: any[];
 };
 
 function getOrderTypeLabel(orderType: string | null | undefined) {
@@ -54,7 +60,6 @@ function getPartnerTypeLabel(partnerType: string | null | undefined) {
     소매점: "소매점",
     직영점: "직영점",
     기타: "기타",
-
     seller: "판매처",
     sales: "판매처",
     wholesale: "도매점",
@@ -65,7 +70,6 @@ function getPartnerTypeLabel(partnerType: string | null | undefined) {
   };
 
   const key = String(partnerType || "").trim();
-
   return labels[key] || key || "-";
 }
 
@@ -75,7 +79,6 @@ function getProductCategoryLabel(category: string | null | undefined) {
     팟: "팟",
     디바이스: "디바이스",
     액상: "액상",
-
     disposable: "일회용기기",
     pod: "팟",
     device: "디바이스",
@@ -85,7 +88,6 @@ function getProductCategoryLabel(category: string | null | undefined) {
   };
 
   const key = String(category || "").trim();
-
   return labels[key] || key || "-";
 }
 
@@ -100,7 +102,6 @@ function getPriceTypeLabel(priceType: string | null | undefined) {
   };
 
   const key = String(priceType || "").trim();
-
   return labels[key] || key || "-";
 }
 
@@ -133,7 +134,6 @@ function TaxInvoiceStatusCard({ order }: { order: Order }) {
   return (
     <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
       <p className="text-sm text-emerald-700">세금계산서</p>
-
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <span className="inline-flex rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
           발행
@@ -142,7 +142,6 @@ function TaxInvoiceStatusCard({ order }: { order: Order }) {
           {taxInvoiceInfo.invoiceNumber || "번호 없음"}
         </span>
       </div>
-
       {taxInvoiceInfo.issueDate ? (
         <p className="mt-2 text-xs text-gray-500">
           발행일 {taxInvoiceInfo.issueDate}
@@ -152,11 +151,14 @@ function TaxInvoiceStatusCard({ order }: { order: Order }) {
   );
 }
 
-export default function OrderDetailModal({ order }: OrderDetailModalProps) {
+export default function OrderDetailModal({
+  order,
+  partners,
+  products,
+}: OrderDetailModalProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
-
   const items = order.order_items || [];
 
   function handleDelete() {
@@ -171,7 +173,6 @@ export default function OrderDetailModal({ order }: OrderDetailModalProps) {
     startTransition(async () => {
       try {
         await deleteOrder(order.id);
-
         alert("주문이 삭제되었습니다.");
         setOpen(false);
         router.refresh();
@@ -180,7 +181,6 @@ export default function OrderDetailModal({ order }: OrderDetailModalProps) {
           error instanceof Error
             ? error.message
             : "주문 삭제 중 오류가 발생했습니다.";
-
         alert(message);
       }
     });
@@ -337,7 +337,7 @@ export default function OrderDetailModal({ order }: OrderDetailModalProps) {
               </p>
             </div>
 
-            <div className="flex justify-between gap-2">
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
               <button
                 type="button"
                 onClick={handleDelete}
@@ -347,13 +347,21 @@ export default function OrderDetailModal({ order }: OrderDetailModalProps) {
                 {isPending ? "삭제 중..." : "주문 삭제"}
               </button>
 
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white"
-              >
-                확인
-              </button>
+              <div className="flex justify-end gap-2">
+                <OrderEditModal
+                  order={order}
+                  partners={partners}
+                  products={products}
+                />
+
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white"
+                >
+                  확인
+                </button>
+              </div>
             </div>
           </div>
         </div>
