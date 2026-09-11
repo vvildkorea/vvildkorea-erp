@@ -2,18 +2,19 @@
 
 import { useMemo, useState } from "react";
 
-type MoneyField = "purchasePrice" | "salePrice" | "shippingFee" | "platformFee";
+type MoneyField = "purchasePrice" | "salePrice";
 
 type FormState = Record<MoneyField, string> & {
   discountRate: string;
 };
 
+const SHIPPING_FEE = 2_000;
+const PLATFORM_FEE = 15_000;
+
 const INITIAL_FORM: FormState = {
   purchasePrice: "",
   discountRate: "",
   salePrice: "",
-  shippingFee: "",
-  platformFee: "",
 };
 
 const moneyFormatter = new Intl.NumberFormat("ko-KR", {
@@ -49,16 +50,27 @@ export default function ResaleMarginCalculator() {
     const purchasePrice = toNumber(form.purchasePrice);
     const discountRate = Math.min(Math.max(toNumber(form.discountRate), 0), 100);
     const salePrice = toNumber(form.salePrice);
-    const shippingFee = toNumber(form.shippingFee);
-    const platformFee = toNumber(form.platformFee);
+    const hasCalculationInput = purchasePrice > 0 || salePrice > 0 || discountRate > 0;
+
+    if (!hasCalculationInput) {
+      return {
+        actualPurchasePrice: 0,
+        cashMargin: 0,
+        purchaseInputVat: 0,
+        shippingInputVat: 0,
+        refundableInputVat: 0,
+        vatAdjustedMargin: 0,
+        vatAdjustedMarginRate: 0,
+      };
+    }
 
     const actualPurchasePrice = purchasePrice * (1 - discountRate / 100);
-    const cashMargin = salePrice - actualPurchasePrice - shippingFee - platformFee;
+    const cashMargin = salePrice - actualPurchasePrice - SHIPPING_FEE - PLATFORM_FEE;
 
     // 한국에서 매입한 상품과 국내 과세 택배비가 VAT 포함 금액이고,
     // 적격증빙으로 매입세액 공제가 가능한 경우를 가정한다.
     const purchaseInputVat = actualPurchasePrice / 11;
-    const shippingInputVat = shippingFee / 11;
+    const shippingInputVat = SHIPPING_FEE / 11;
     const refundableInputVat = purchaseInputVat + shippingInputVat;
 
     // 실제 재화 수출로 영세율(한국 매출 VAT 0%)이 적용되는 경우를 가정한다.
@@ -134,7 +146,7 @@ export default function ResaleMarginCalculator() {
             <div className="flex items-center justify-between gap-4">
               <div>
                 <h2 className="text-xl font-black text-slate-900">판매 조건 입력</h2>
-                <p className="mt-1 text-sm text-slate-500">파란색 입력칸만 작성하면 결과가 자동 계산됩니다.</p>
+                <p className="mt-1 text-sm text-slate-500">구매가·할인율·판매가만 입력하면 자동 계산됩니다.</p>
               </div>
               <div className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">
                 자동 계산
@@ -176,55 +188,50 @@ export default function ResaleMarginCalculator() {
                 />
               </CalculatorRow>
 
-              <CalculatorRow label="국내 택배비">
-                <MoneyInput
-                  value={form.shippingFee}
-                  onChange={(value) => updateMoneyField("shippingFee", value)}
-                  placeholder="3,000"
-                />
-              </CalculatorRow>
+              <FixedRow label="국내 택배비" value={formatKrw(SHIPPING_FEE)} />
+              <FixedRow label="포이즌 수수료" value={formatKrw(PLATFORM_FEE)} />
 
-              <CalculatorRow label="포이즌 수수료">
-                <MoneyInput
-                  value={form.platformFee}
-                  onChange={(value) => updateMoneyField("platformFee", value)}
-                  placeholder="15,000"
+              <div className="xl:hidden">
+                <MobileMarginRow
+                  value={formatKrw(calculations.vatAdjustedMargin)}
+                  rate={`${percentFormatter.format(calculations.vatAdjustedMarginRate)}%`}
+                  negative={calculations.vatAdjustedMargin < 0}
                 />
-              </CalculatorRow>
+              </div>
             </div>
 
             <div className="mt-5 rounded-2xl bg-slate-50 p-4 text-xs leading-5 text-slate-500">
               <p className="font-bold text-slate-700">계산 전제</p>
               <p className="mt-1">
-                구매가와 국내 택배비는 VAT 포함 금액이며 적격증빙으로 매입세액 공제가 가능하다고 가정합니다.
-                포이즌 등 해외 플랫폼 수수료는 한국 매입 VAT 계산에서 제외합니다.
+                국내 택배비는 2,000원, 포이즌 수수료는 15,000원으로 고정합니다. 구매가와 국내 택배비는 VAT 포함 금액이며
+                적격증빙으로 매입세액 공제가 가능하다고 가정합니다. 포이즌 수수료는 한국 매입 VAT 계산에서 제외합니다.
               </p>
             </div>
           </section>
 
-          <section className="rounded-[28px] bg-slate-900 p-5 text-white shadow-[0_18px_50px_rgba(15,23,42,0.14)] sm:p-7">
+          <section className="rounded-[28px] border border-slate-700 bg-[#0f172a] p-5 shadow-[0_18px_50px_rgba(15,23,42,0.18)] sm:p-7">
             <div>
-              <p className="text-sm font-bold text-slate-400">VAT 반영 예상 결과</p>
+              <p className="text-sm font-black text-[#cbd5e1]">VAT 반영 예상 결과</p>
               <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
                 <div>
                   <p
                     className={`text-4xl font-black tracking-tight ${
-                      calculations.vatAdjustedMargin < 0 ? "text-rose-400" : "text-white"
+                      calculations.vatAdjustedMargin < 0 ? "text-[#fb7185]" : "text-[#f8fafc]"
                     }`}
                   >
                     {formatKrw(calculations.vatAdjustedMargin)}
                   </p>
-                  <p className="mt-2 text-sm text-slate-400">VAT 반영 예상마진</p>
+                  <p className="mt-2 text-sm font-semibold text-[#cbd5e1]">VAT 반영 예상마진</p>
                 </div>
 
                 <div
-                  className={`rounded-2xl px-4 py-3 text-right ${
+                  className={`rounded-2xl border px-4 py-3 text-right ${
                     calculations.vatAdjustedMarginRate < 0
-                      ? "bg-rose-500/15 text-rose-300"
-                      : "bg-white/10 text-white"
+                      ? "border-rose-400/30 bg-rose-400/15 text-[#fda4af]"
+                      : "border-slate-600 bg-[#1e293b] text-[#f8fafc]"
                   }`}
                 >
-                  <p className="text-xs font-bold opacity-70">마진율</p>
+                  <p className="text-xs font-bold text-[#cbd5e1]">마진율</p>
                   <p className="mt-1 text-2xl font-black">
                     {percentFormatter.format(calculations.vatAdjustedMarginRate)}%
                   </p>
@@ -244,14 +251,14 @@ export default function ResaleMarginCalculator() {
               />
             </div>
 
-            <div className="mt-6 overflow-hidden rounded-2xl border border-white/10 bg-white/5">
+            <div className="mt-6 overflow-hidden rounded-2xl border border-slate-600 bg-[#111c31]">
               <ResultDetailRow label="상품 매입 VAT" value={formatKrw(calculations.purchaseInputVat)} />
               <ResultDetailRow label="국내 택배 VAT" value={formatKrw(calculations.shippingInputVat)} />
               <ResultDetailRow label="한국 매출 VAT" value="₩0" note="수출 영세율 가정" />
               <ResultDetailRow label="포이즌 수수료 VAT" value="계산 제외" note="해외 플랫폼" last />
             </div>
 
-            <div className="mt-6 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-xs leading-5 text-amber-100/80">
+            <div className="mt-6 rounded-2xl border border-amber-300/40 bg-[#2b2818] p-4 text-xs font-medium leading-5 text-[#fde68a]">
               실제 부가세 공제·환급액은 사업자 과세유형, 적격증빙, 실제 수출 및 영세율 증빙 여부에 따라 달라질 수 있습니다.
               이 계산기는 판매 의사결정을 위한 예상치입니다.
             </div>
@@ -262,8 +269,8 @@ export default function ResaleMarginCalculator() {
           <h2 className="text-lg font-black text-slate-900">계산식</h2>
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             <FormulaCard label="실구매가" formula="구매가 × (1 - 추가할인율)" />
-            <FormulaCard label="판매마진" formula="판매가 - 실구매가 - 택배비 - 수수료" />
-            <FormulaCard label="환급가능 매입 VAT" formula="실구매가 ÷ 11 + 국내 택배비 ÷ 11" />
+            <FormulaCard label="판매마진" formula="판매가 - 실구매가 - 2,000원 - 15,000원" />
+            <FormulaCard label="환급가능 매입 VAT" formula="실구매가 ÷ 11 + 2,000원 ÷ 11" />
             <FormulaCard label="VAT 반영 예상마진" formula="판매마진 + 환급가능 매입 VAT" />
           </div>
         </section>
@@ -296,6 +303,42 @@ function CalculatedRow({ label, value }: { label: string; value: string }) {
         {label}
       </div>
       <div className="px-4 py-3 text-right text-lg font-black text-slate-900 sm:px-5">{value}</div>
+    </div>
+  );
+}
+
+function FixedRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid grid-cols-[minmax(120px,0.85fr)_minmax(0,1.15fr)] items-center border-b border-slate-200">
+      <div className="flex min-h-[76px] items-center bg-[#e9f3eb] px-4 py-3 text-sm font-black text-slate-700 sm:px-5">
+        {label}
+      </div>
+      <div className="flex items-center justify-end gap-2 px-4 py-3 sm:px-5">
+        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-500">고정</span>
+        <span className="text-lg font-black text-slate-900">{value}</span>
+      </div>
+    </div>
+  );
+}
+
+function MobileMarginRow({
+  value,
+  rate,
+  negative,
+}: {
+  value: string;
+  rate: string;
+  negative: boolean;
+}) {
+  return (
+    <div className="grid grid-cols-[minmax(120px,0.85fr)_minmax(0,1.15fr)] items-center bg-slate-900">
+      <div className="flex min-h-[82px] items-center bg-slate-800 px-4 py-3 text-sm font-black text-white sm:px-5">
+        VAT 반영 마진
+      </div>
+      <div className="px-4 py-3 text-right sm:px-5">
+        <p className={`text-xl font-black ${negative ? "text-rose-400" : "text-white"}`}>{value}</p>
+        <p className="mt-1 text-xs font-bold text-slate-300">마진율 {rate}</p>
+      </div>
     </div>
   );
 }
@@ -336,9 +379,9 @@ function ResultCard({
   negative?: boolean;
 }) {
   return (
-    <div className="rounded-2xl bg-white/10 p-4">
-      <p className="text-xs font-bold text-slate-400">{label}</p>
-      <p className={`mt-2 text-xl font-black ${negative ? "text-rose-400" : "text-white"}`}>{value}</p>
+    <div className="rounded-2xl border border-slate-600 bg-[#1e293b] p-4">
+      <p className="text-xs font-black text-[#cbd5e1]">{label}</p>
+      <p className={`mt-2 text-xl font-black ${negative ? "text-[#fb7185]" : "text-[#f8fafc]"}`}>{value}</p>
     </div>
   );
 }
@@ -355,12 +398,12 @@ function ResultDetailRow({
   last?: boolean;
 }) {
   return (
-    <div className={`flex items-center justify-between gap-4 px-4 py-3 ${last ? "" : "border-b border-white/10"}`}>
+    <div className={`flex items-center justify-between gap-4 px-4 py-3 ${last ? "" : "border-b border-slate-700"}`}>
       <div>
-        <p className="text-sm font-bold text-slate-300">{label}</p>
-        {note ? <p className="mt-0.5 text-xs text-slate-500">{note}</p> : null}
+        <p className="text-sm font-black text-[#e2e8f0]">{label}</p>
+        {note ? <p className="mt-0.5 text-xs font-medium text-[#94a3b8]">{note}</p> : null}
       </div>
-      <p className="shrink-0 text-sm font-black text-white">{value}</p>
+      <p className="shrink-0 text-sm font-black text-[#f8fafc]">{value}</p>
     </div>
   );
 }
