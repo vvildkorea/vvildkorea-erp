@@ -8,6 +8,7 @@ const isProtectedRoute = createRouteMatcher([
   "/products(.*)",
   "/import-forwarding(.*)",
   "/inventory(.*)",
+  "/resale-margin(.*)",
   "/accounting-network(.*)",
   "/operators(.*)",
 ]);

@@ -69,6 +69,11 @@ const menus: {
     permissionKey: "can_access_inventory",
   },
   {
+    href: "/resale-margin",
+    label: "리셀 마진 계산기",
+    permissionKey: "can_access_accounting_network",
+  },
+  {
     href: "/accounting-network",
     label: "회계/유통망",
     permissionKey: "can_access_accounting_network",

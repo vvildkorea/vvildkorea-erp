@@ -10,6 +10,7 @@ const menuItems = [
   { name: "제품 관리", href: "/products" },
   { name: "수입/포워딩", href: "/import-forwarding" },
   { name: "재고 관리", href: "/inventory" },
+  { name: "리셀 마진 계산기", href: "/resale-margin" },
   { name: "회계/유통망", href: "/accounting-network" },
   { name: "운영자 관리", href: "/operators" },
 ];

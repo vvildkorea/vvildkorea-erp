@@ -11,6 +11,7 @@ const menus = [
   { href: "/products", label: "제품 관리" },
   { href: "/import-forwarding", label: "수입/포워딩" },
   { href: "/inventory", label: "재고 관리" },
+  { href: "/resale-margin", label: "리셀 마진 계산기" },
   { href: "/accounting-network", label: "회계/유통망" },
   { href: "/operators", label: "운영자 관리" },
 ];
