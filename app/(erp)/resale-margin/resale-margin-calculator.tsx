@@ -56,6 +56,7 @@ export default function ResaleMarginCalculator() {
       return {
         actualPurchasePrice: 0,
         cashMargin: 0,
+        cashMarginRate: 0,
         purchaseInputVat: 0,
         shippingInputVat: 0,
         refundableInputVat: 0,
@@ -66,6 +67,7 @@ export default function ResaleMarginCalculator() {
 
     const actualPurchasePrice = purchasePrice * (1 - discountRate / 100);
     const cashMargin = salePrice - actualPurchasePrice - SHIPPING_FEE - PLATFORM_FEE;
+    const cashMarginRate = salePrice > 0 ? (cashMargin / salePrice) * 100 : 0;
 
     // 한국에서 매입한 상품과 국내 과세 택배비가 VAT 포함 금액이고,
     // 적격증빙으로 매입세액 공제가 가능한 경우를 가정한다.
@@ -80,6 +82,7 @@ export default function ResaleMarginCalculator() {
     return {
       actualPurchasePrice,
       cashMargin,
+      cashMarginRate,
       purchaseInputVat,
       shippingInputVat,
       refundableInputVat,
@@ -193,9 +196,8 @@ export default function ResaleMarginCalculator() {
 
               <div className="xl:hidden">
                 <MobileMarginRow
-                  value={formatKrw(calculations.vatAdjustedMargin)}
-                  rate={`${percentFormatter.format(calculations.vatAdjustedMarginRate)}%`}
-                  negative={calculations.vatAdjustedMargin < 0}
+                  value={formatKrw(calculations.cashMargin)}
+                  rate={`${percentFormatter.format(calculations.cashMarginRate)}%`}
                 />
               </div>
             </div>
@@ -324,20 +326,19 @@ function FixedRow({ label, value }: { label: string; value: string }) {
 function MobileMarginRow({
   value,
   rate,
-  negative,
 }: {
   value: string;
   rate: string;
-  negative: boolean;
 }) {
   return (
     <div className="grid grid-cols-[minmax(120px,0.85fr)_minmax(0,1.15fr)] items-center bg-slate-900">
-      <div className="flex min-h-[82px] items-center bg-slate-800 px-4 py-3 text-sm font-black text-white sm:px-5">
-        VAT 반영 마진
+      <div className="flex min-h-[82px] flex-col items-start justify-center bg-slate-800 px-4 py-3 text-sm font-black !text-white sm:px-5">
+        <span className="!text-white">마진</span>
+        <span className="mt-1 text-[11px] font-semibold !text-slate-300">VAT 환급 제외</span>
       </div>
       <div className="px-4 py-3 text-right sm:px-5">
-        <p className={`text-xl font-black ${negative ? "text-rose-400" : "text-white"}`}>{value}</p>
-        <p className="mt-1 text-xs font-bold text-slate-300">마진율 {rate}</p>
+        <p className="text-xl font-black !text-white">{value}</p>
+        <p className="mt-1 text-xs font-bold !text-white">마진율 {rate}</p>
       </div>
     </div>
   );
