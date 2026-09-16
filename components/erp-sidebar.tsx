@@ -10,6 +10,7 @@ const menuItems = [
   { name: "제품 관리", href: "/products" },
   { name: "수입/포워딩", href: "/import-forwarding" },
   { name: "재고 관리", href: "/inventory" },
+  { name: "리셀 상품 발굴", href: "/resale-finder" },
   { name: "리셀 마진 계산기", href: "/resale-margin" },
   { name: "회계/유통망", href: "/accounting-network" },
   { name: "운영자 관리", href: "/operators" },
@@ -21,9 +22,7 @@ export function ErpSidebar() {
   return (
     <aside className="hidden w-64 border-r border-slate-200 bg-white md:block">
       <div className="border-b border-slate-200 px-5 py-5">
-        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-          ERP
-        </p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">ERP</p>
         <h1 className="mt-1 text-xl font-bold text-slate-900">vvildkorea</h1>
       </div>
 

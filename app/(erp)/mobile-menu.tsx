@@ -11,6 +11,7 @@ const menus = [
   { href: "/products", label: "제품 관리" },
   { href: "/import-forwarding", label: "수입/포워딩" },
   { href: "/inventory", label: "재고 관리" },
+  { href: "/resale-finder", label: "리셀 상품 발굴" },
   { href: "/resale-margin", label: "리셀 마진 계산기" },
   { href: "/accounting-network", label: "회계/유통망" },
   { href: "/operators", label: "운영자 관리" },
@@ -72,9 +73,7 @@ export default function MobileMenu() {
                     href={menu.href}
                     onClick={() => setOpen(false)}
                     className={`block rounded-lg px-4 py-3 text-sm font-medium ${
-                      active
-                        ? "bg-gray-900 text-white"
-                        : "text-gray-700 hover:bg-gray-100"
+                      active ? "bg-gray-900 text-white" : "text-gray-700 hover:bg-gray-100"
                     }`}
                   >
                     {menu.label}
