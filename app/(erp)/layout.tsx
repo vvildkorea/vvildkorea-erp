@@ -74,6 +74,11 @@ const menus: {
     permissionKey: "can_access_accounting_network",
   },
   {
+    href: "/resale-finder",
+    label: "리셀 상품 발굴",
+    permissionKey: "can_access_accounting_network",
+  },
+  {
     href: "/accounting-network",
     label: "회계/유통망",
     permissionKey: "can_access_accounting_network",
