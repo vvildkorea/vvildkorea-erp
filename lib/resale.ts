@@ -78,6 +78,14 @@ function safeNumber(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+export function calculatePoizonFee(salePrice: number) {
+  const normalizedSalePrice = Math.max(0, safeNumber(salePrice));
+  if (normalizedSalePrice <= 0) return 0;
+  if (normalizedSalePrice <= 150_000) return 15_000;
+  if (normalizedSalePrice <= 450_000) return normalizedSalePrice * 0.1;
+  return 45_000;
+}
+
 function platformResult({
   platform,
   salePrice,
@@ -99,7 +107,10 @@ function platformResult({
 }): PlatformResult {
   const normalizedSalePrice = Math.max(0, safeNumber(salePrice));
   const variableFee = normalizedSalePrice * (Math.max(0, safeNumber(feeRate)) / 100);
-  const fee = variableFee + Math.max(0, safeNumber(fixedFee));
+  const fee =
+    platform === "POIZON"
+      ? calculatePoizonFee(normalizedSalePrice)
+      : variableFee + Math.max(0, safeNumber(fixedFee));
   const normalizedShippingFee = Math.max(0, safeNumber(shippingFee));
   const netReceipt = Math.max(0, normalizedSalePrice - fee - normalizedShippingFee);
   const profit = normalizedSalePrice > 0 ? netReceipt - actualPurchasePrice : 0;

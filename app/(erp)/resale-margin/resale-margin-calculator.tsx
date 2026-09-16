@@ -9,7 +9,12 @@ type FormState = Record<MoneyField, string> & {
 };
 
 const SHIPPING_FEE = 2_000;
-const PLATFORM_FEE = 15_000;
+function calculatePoizonFee(salePrice: number) {
+  if (salePrice <= 0) return 0;
+  if (salePrice <= 150_000) return 15_000;
+  if (salePrice <= 450_000) return salePrice * 0.1;
+  return 45_000;
+}
 
 const INITIAL_FORM: FormState = {
   purchasePrice: "",
@@ -55,6 +60,7 @@ export default function ResaleMarginCalculator() {
     if (!hasCalculationInput) {
       return {
         actualPurchasePrice: 0,
+        platformFee: 0,
         cashMargin: 0,
         cashMarginRate: 0,
         purchaseInputVat: 0,
@@ -66,7 +72,8 @@ export default function ResaleMarginCalculator() {
     }
 
     const actualPurchasePrice = purchasePrice * (1 - discountRate / 100);
-    const cashMargin = salePrice - actualPurchasePrice - SHIPPING_FEE - PLATFORM_FEE;
+    const platformFee = calculatePoizonFee(salePrice);
+    const cashMargin = salePrice - actualPurchasePrice - SHIPPING_FEE - platformFee;
     const cashMarginRate = salePrice > 0 ? (cashMargin / salePrice) * 100 : 0;
 
     // 한국에서 매입한 상품과 국내 과세 택배비가 VAT 포함 금액이고,
@@ -81,6 +88,7 @@ export default function ResaleMarginCalculator() {
 
     return {
       actualPurchasePrice,
+      platformFee,
       cashMargin,
       cashMarginRate,
       purchaseInputVat,
@@ -192,7 +200,7 @@ export default function ResaleMarginCalculator() {
               </CalculatorRow>
 
               <FixedRow label="국내 택배비" value={formatKrw(SHIPPING_FEE)} />
-              <FixedRow label="포이즌 수수료" value={formatKrw(PLATFORM_FEE)} />
+              <DynamicFeeRow value={formatKrw(calculations.platformFee)} />
 
               <div className="xl:hidden">
                 <MobileMarginRow
@@ -205,7 +213,8 @@ export default function ResaleMarginCalculator() {
             <div className="mt-5 rounded-2xl bg-slate-50 p-4 text-xs leading-5 text-slate-500">
               <p className="font-bold text-slate-700">계산 전제</p>
               <p className="mt-1">
-                국내 택배비는 2,000원, 포이즌 수수료는 15,000원으로 고정합니다. 구매가와 국내 택배비는 VAT 포함 금액이며
+                국내 택배비는 2,000원으로 고정합니다. 포이즌 수수료는 판매가에 따라 자동 계산합니다: 150,000원 이하 15,000원,
+                150,000원 초과~450,000원 이하 판매가의 10%, 450,000원 초과 45,000원. 구매가와 국내 택배비는 VAT 포함 금액이며
                 적격증빙으로 매입세액 공제가 가능하다고 가정합니다. 포이즌 수수료는 한국 매입 VAT 계산에서 제외합니다.
               </p>
             </div>
@@ -271,7 +280,7 @@ export default function ResaleMarginCalculator() {
           <h2 className="text-lg font-black text-slate-900">계산식</h2>
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             <FormulaCard label="실구매가" formula="구매가 × (1 - 추가할인율)" />
-            <FormulaCard label="판매마진" formula="판매가 - 실구매가 - 2,000원 - 15,000원" />
+            <FormulaCard label="판매마진" formula="판매가 - 실구매가 - 2,000원 - 판매가 구간별 포이즌 수수료" />
             <FormulaCard label="환급가능 매입 VAT" formula="실구매가 ÷ 11 + 2,000원 ÷ 11" />
             <FormulaCard label="VAT 반영 예상마진" formula="판매마진 + 환급가능 매입 VAT" />
           </div>
@@ -317,6 +326,20 @@ function FixedRow({ label, value }: { label: string; value: string }) {
       </div>
       <div className="flex items-center justify-end gap-2 px-4 py-3 sm:px-5">
         <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-500">고정</span>
+        <span className="text-lg font-black text-slate-900">{value}</span>
+      </div>
+    </div>
+  );
+}
+
+function DynamicFeeRow({ value }: { value: string }) {
+  return (
+    <div className="grid grid-cols-[minmax(120px,0.85fr)_minmax(0,1.15fr)] items-center border-b border-slate-200">
+      <div className="flex min-h-[76px] items-center bg-[#e9f3eb] px-4 py-3 text-sm font-black text-slate-700 sm:px-5">
+        포이즌 수수료
+      </div>
+      <div className="flex items-center justify-end gap-2 px-4 py-3 sm:px-5">
+        <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-black text-blue-600">자동</span>
         <span className="text-lg font-black text-slate-900">{value}</span>
       </div>
     </div>

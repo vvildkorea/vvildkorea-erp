@@ -991,7 +991,7 @@ function SettingsPanel({
     <section className="rounded-[24px] border border-slate-300 bg-slate-900 p-5 text-white shadow-sm sm:p-6">
       <div>
         <h2 className="text-xl font-black">매입 판정 기준</h2>
-        <p className="mt-1 text-sm font-semibold text-slate-300">수수료가 바뀌면 여기만 수정하면 모든 후보가 즉시 다시 계산됩니다.</p>
+        <p className="mt-1 text-sm font-semibold text-slate-300">KREAM 비용과 배송비는 여기서 조정하고, POIZON 플랫폼 수수료는 판매가 구간에 따라 자동 계산됩니다.</p>
       </div>
 
       <div className="mt-5 grid gap-4 md:grid-cols-3">
@@ -1011,9 +1011,10 @@ function SettingsPanel({
         </div>
         <div className="rounded-2xl border border-slate-700 bg-slate-800/70 p-4">
           <p className="font-black">POIZON 비용</p>
-          <div className="mt-3 grid gap-3 sm:grid-cols-3">
-            <DarkNumberField label="수수료율 %" value={form.poizonFeeRate} onChange={(value) => set("poizonFeeRate", value)} />
-            <DarkMoneyField label="고정 수수료" value={form.poizonFixedFee} onChange={(value) => set("poizonFixedFee", moneyInput(value))} />
+          <div className="mt-3 rounded-xl border border-cyan-400/20 bg-cyan-400/10 p-3 text-xs font-semibold leading-5 text-cyan-100">
+            판매가 150,000원 이하: 15,000원 · 150,000원 초과~450,000원 이하: 판매가의 10% · 450,000원 초과: 45,000원
+          </div>
+          <div className="mt-3">
             <DarkMoneyField label="국내 택배비" value={form.poizonShippingFee} onChange={(value) => set("poizonShippingFee", moneyInput(value))} />
           </div>
         </div>
